@@ -614,6 +614,11 @@ CHARACTER = $(S_LINK Character, character)
 CHARACTERS = $(S_LINK Character, characters)
 CLUSTER = $(S_LINK Grapheme cluster, grapheme cluster)
 +/
+
+// !!!
+// Changed all compile-time references to "format" to "formatCTFE"
+// !!!
+
 module std.uni;
 
 import std.meta; // AliasSeq
@@ -2577,7 +2582,7 @@ public:
     {
         import std.algorithm.searching : countUntil;
         import std.array : array;
-        import std.format : format;
+        import std.format : formatCTFE;
         enum maxBinary = 3;
         static string linearScope(R)(R ivals, string indent)
         {
@@ -2589,21 +2594,21 @@ public:
                 assert(span != 0);
                 if (span == 1)
                 {
-                    result ~= format("%sif (ch == %s) return true;\n", deeper, ival[0]);
+                    result ~= formatCTFE("%sif (ch == %s) return true;\n", deeper, ival[0]);
                 }
                 else if (span == 2)
                 {
-                    result ~= format("%sif (ch == %s || ch == %s) return true;\n",
+                    result ~= formatCTFE("%sif (ch == %s || ch == %s) return true;\n",
                         deeper, ival[0], ival[0]+1);
                 }
                 else
                 {
                     if (ival[0] != 0) // dchar is unsigned and  < 0 is useless
-                        result ~= format("%sif (ch < %s) return false;\n", deeper, ival[0]);
-                    result ~= format("%sif (ch < %s) return true;\n", deeper, ival[1]);
+                        result ~= formatCTFE("%sif (ch < %s) return false;\n", deeper, ival[0]);
+                    result ~= formatCTFE("%sif (ch < %s) return true;\n", deeper, ival[1]);
                 }
             }
-            result ~= format("%sreturn false;\n%s}\n", deeper, indent); // including empty range of intervals
+            result ~= formatCTFE("%sreturn false;\n%s}\n", deeper, indent); // including empty range of intervals
             return result;
         }
 
@@ -2626,12 +2631,12 @@ public:
             {
                 if (ival[0]+1 == ival[1])
                 {
-                    result ~= format("%scase %s: return true;\n",
+                    result ~= formatCTFE("%scase %s: return true;\n",
                         deeper, ival[0]);
                 }
                 else
                 {
-                    result ~= format("%scase %s: .. case %s: return true;\n",
+                    result ~= formatCTFE("%scase %s: .. case %s: return true;\n",
                          deeper, ival[0], ival[1]-1);
                 }
             }
@@ -2645,18 +2650,18 @@ public:
             // bisect on one [a, b) interval at idx
             string result = indent~"{\n";
             // less branch, < a
-            result ~= format("%sif (ch < %s)\n%s",
+            result ~= formatCTFE("%sif (ch < %s)\n%s",
                 deeper, range[idx][0], binaryScope(range[0..idx], deeper));
             // middle point,  >= a && < b
-            result ~= format("%selse if (ch < %s) return true;\n",
+            result ~= formatCTFE("%selse if (ch < %s) return true;\n",
                 deeper, range[idx][1]);
             // greater or equal branch,  >= b
-            result ~= format("%selse\n%s",
+            result ~= formatCTFE("%selse\n%s",
                 deeper, binaryScope(range[idx+1..$], deeper));
             return result~indent~"}\n";
         }
 
-        string code = format("bool %s(dchar ch) @safe pure nothrow @nogc\n",
+        string code = formatCTFE("bool %s(dchar ch) @safe pure nothrow @nogc\n",
             funcName.empty ? "function" : funcName);
         auto range = byInterval.array();
         // special case first bisection to be on ASCII vs beyond
@@ -4700,7 +4705,7 @@ template Utf8Matcher()
     // from 3 primitives: tab!(size), lookup and Sizes
     mixin template DefMatcher()
     {
-        import std.format : format;
+        import std.format : formatCTFE;
         import std.meta : Erase, staticIndexOf;
         enum hasASCII = staticIndexOf!(1, Sizes) >= 0;
         alias UniSizes = Erase!(1, Sizes);
@@ -4710,7 +4715,7 @@ template Utf8Matcher()
         {
             string code;
             foreach (size; UniSizes)
-                code ~= format(q{
+                code ~= formatCTFE(q{
                     if ((ch & ~leadMask!%d) == encMask!(%d))
                         return lookup!(%d, mode)(inp);
                     else

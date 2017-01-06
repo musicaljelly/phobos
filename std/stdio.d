@@ -830,10 +830,15 @@ Throws: $(D Exception) if the file is not opened or if the call to $(D fflush) f
  */
     void flush() @trusted
     {
-        import std.exception : enforce, errnoEnforce;
+        import std.exception : enforce, errnoEnforce, ErrnoException;
 
         enforce(isOpen, "Attempting to flush() in an unopened file");
-        errnoEnforce(.fflush(_p.handle) == 0);
+        // !!!
+        // If we don't have a console window open, just silently don't print anything
+        auto code = .fflush(_p.handle);
+        import core.stdc.errno;
+        errnoEnforce(code == 0 || errno == 9);
+        // !!!
     }
 
     @safe unittest
@@ -2656,7 +2661,10 @@ $(D Range) that locks the file and allows fast writing to it.
                     //file.write(writeme); causes infinite recursion!!!
                     //file.rawWrite(writeme);
                     auto result = trustedFwrite(fps_, writeme);
-                    if (result != writeme.length) errnoEnforce(0);
+                    // !!!
+                    // If we don't have a console window open, just silently don't print anything
+                    //if (result != writeme.length) errnoEnforce(0);
+                    // !!!
                     return;
                 }
             }

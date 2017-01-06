@@ -5188,9 +5188,69 @@ void main()
 }
 ------------------------
  */
-deprecated("It will be removed from Phobos in October 2016. If you still need it, go to https://github.com/DigitalMars/undeaD")
+
+
+// !!!
+// Mark as debug so that we can use impure functions inside of pure ones.
+// We have to use a specific debug identifier so we don't enable all the other debug code in druntime and phobos
+debug (FastCompilingFormat)
+{
+    // Don't change this function signature, or we'll get a linker error when calling existing functions that expect to call
+    // a function that mangles to this exact signature.
+    // Marked as @trusted so that @safe functions can still call this.
+    @trusted immutable(Char)[] format(Char)(in Char[] fmt, ...) if (isSomeChar!Char)
+    {
+        debug (FastCompilingFormat)
+        {
+            string outputString;
+
+            void putc(dchar c)
+            {
+                outputString ~= c;
+            }
+
+            // Add fmt on to the beginning of the argument list
+            TypeInfo[] allArguments = typeid(Char[]) ~ _arguments;
+
+            try
+            {
+                // Use &fmt so that fmt is included in the variadic arguments.
+                // Note that this assumes arguments are laid out in the usual manner on the stack.
+                // If the calling convention were to ever change in a way that changed the argument layout, this
+                // assumption would no longer hold and this code would break.
+                doFormat(&putc, allArguments, cast(char*) &fmt);
+            }
+            catch (FormatException e)
+            {
+                import std.exception : assumeUnique;
+                return "EXCEPTION WHILE FORMATTING: " ~ fmt.assumeUnique();
+            }
+
+            return outputString;
+        }
+        else
+        {
+            // This should never compile!
+            pragma(msg, "-------------------------------------");
+            pragma(msg, "- ERROR: This should never compile! -");
+            pragma(msg, "-------------------------------------");
+            return null;
+        }
+    }
+}
+else
+{
+    alias format = formatCTFE;
+}
+// !!!
+
+
+// !!!
+//deprecated("It will be removed from Phobos in October 2016. If you still need it, go to https://github.com/DigitalMars/undeaD")
+ // !!!
+
 // @@@DEPRECATED_2016-10@@@
-void doFormat()(scope void delegate(dchar) putc, TypeInfo[] arguments, va_list ap)
+void doFormat(scope void delegate(dchar) putc, TypeInfo[] arguments, va_list ap)
 {
     import std.utf : toUCSindex, isValidDchar, UTFException, toUTF8;
     import core.stdc.string : strlen;
@@ -6433,7 +6493,10 @@ private bool needToSwapEndianess(Char)(ref FormatSpec!Char f)
  * Params: fmt  = Format string. For detailed specification, see $(REF formattedWrite, std,_format).
  *         args = Variadic list of arguments to format into returned string.
  */
-immutable(Char)[] format(Char, Args...)(in Char[] fmt, Args args) if (isSomeChar!Char)
+// !!!
+// Changed name from format() to formatCTFE()
+immutable(Char)[] formatCTFE(Char, Args...)(in Char[] fmt, Args args) if (isSomeChar!Char)
+// !!!
 {
     import std.format : formattedWrite, FormatException;
     import std.array : appender;

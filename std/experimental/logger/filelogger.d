@@ -78,7 +78,13 @@ class FileLogger : Logger
         @safe
     {
         import std.string : lastIndexOf;
-        ptrdiff_t fnIdx = file.lastIndexOf('/') + 1;
+        // !!!
+        // Changed so this works on windows by checking both forward and back slashes.
+        import std.algorithm.comparison : max;
+        ptrdiff_t fnIdxForwardSlash = file.lastIndexOf('/') + 1;
+        ptrdiff_t fnIdxBackSlash = file.lastIndexOf('\\') + 1;
+        ptrdiff_t fnIdx = max(fnIdxForwardSlash, fnIdxBackSlash);
+        // !!!
         ptrdiff_t funIdx = funcName.lastIndexOf('.') + 1;
 
         auto lt = this.file_.lockingTextWriter();

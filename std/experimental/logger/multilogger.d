@@ -45,7 +45,10 @@ class MultiLogger : Logger
     When inheriting from $(D MultiLogger) this member can be used to gain
     access to the stored $(D Logger).
     */
-    protected MultiLoggerEntry[] logger;
+    
+    // !!!
+    MultiLoggerEntry[] logger;
+    // !!!
 
     /** This method inserts a new Logger into the $(D MultiLogger).
 

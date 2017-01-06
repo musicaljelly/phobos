@@ -1246,7 +1246,8 @@ abstract class Logger
     }
 
     /// Ditto
-    final void log(T)(const LogLevel ll, lazy T args, int line = __LINE__,
+    // !!!
+    final void log(const LogLevel ll, lazy const char[] msg, int line = __LINE__,
         string file = __FILE__, string funcName = __FUNCTION__,
         string prettyFuncName = __PRETTY_FUNCTION__,
         string moduleName = __MODULE__)
@@ -1258,7 +1259,7 @@ abstract class Logger
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
                     moduleName, ll, thisTid, Clock.currTime, this);
                 auto writer = MsgRange(this);
-                formatString(writer, args);
+                formatString(writer, msg);
 
                 this.finishLogMsg();
 
@@ -1267,6 +1268,7 @@ abstract class Logger
             }
         }
     }
+    // !!!
 
     /** This function logs data to the used $(D Logger) depending on a
     explicitly passed condition with the $(D LogLevel) of the used
@@ -1605,10 +1607,12 @@ abstract class Logger
 
 // Thread Global
 
-private __gshared Mutex stdSharedLoggerMutex;
-private __gshared Logger stdSharedDefaultLogger;
-private shared Logger stdSharedLogger;
-private shared LogLevel stdLoggerGlobalLogLevel = LogLevel.all;
+// !!!
+__gshared Mutex stdSharedLoggerMutex;
+__gshared Logger stdSharedDefaultLogger;
+shared Logger stdSharedLogger;
+shared LogLevel stdLoggerGlobalLogLevel = LogLevel.all;
+// !!!
 
 /* This method returns the global default Logger.
  * Marked @trusted because of excessive reliance on __gshared data

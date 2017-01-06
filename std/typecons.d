@@ -38,6 +38,11 @@ Authors:   $(HTTP erdani.org, Andrei Alexandrescu),
            Shin Fujishiro,
            Kenji Hara
  */
+
+// !!!
+// Changed all compile-time references to "format" to "formatCTFE"
+// !!!
+
 module std.typecons;
 
 import core.stdc.stdint : uintptr_t;
@@ -395,12 +400,12 @@ template Tuple(Specs...)
         string decl = "";
         foreach (i, name; staticMap!(extractName, fieldSpecs))
         {
-            import std.format : format;
+            import std.format : formatCTFE;
 
-            decl ~= format("alias _%s = Identity!(field[%s]);", i, i);
+            decl ~= formatCTFE("alias _%s = Identity!(field[%s]);", i, i);
             if (name.length != 0)
             {
-                decl ~= format("alias %s = _%s;", name, i);
+                decl ~= formatCTFE("alias %s = _%s;", name, i);
             }
         }
         return decl;
@@ -3614,9 +3619,9 @@ private static:
     // overloaded function with the name.
     template INTERNAL_FUNCINFO_ID(string name, size_t i)
     {
-        import std.format : format;
+        import std.format : formatCTFE;
 
-        enum string INTERNAL_FUNCINFO_ID = format("F_%s_%s", name, i);
+        enum string INTERNAL_FUNCINFO_ID = formatCTFE("F_%s_%s", name, i);
     }
 
     /*
@@ -3911,7 +3916,7 @@ private static:
     }
     else
     {
-        enum string PARAMETER_VARIABLE_ID(size_t i) = format("a%s", i);
+        enum string PARAMETER_VARIABLE_ID(size_t i) = formatCTFE("a%s", i);
             // default: a0, a1, ...
     }
 
@@ -3982,7 +3987,7 @@ private static:
     public string generateFunction(
             string myFuncInfo, string name, func... )() @property
     {
-        import std.format : format;
+        import std.format : formatCTFE;
 
         enum isCtor = (name == CONSTRUCTOR_NAME);
 
@@ -4044,7 +4049,7 @@ private static:
             //
             if (__traits(isVirtualMethod, func))
                 code ~= "override ";
-            code ~= format("extern(%s) %s %s(%s) %s %s\n",
+            code ~= formatCTFE("extern(%s) %s %s(%s) %s %s\n",
                     functionLinkage!(func),
                     returnType,
                     realName,
@@ -4109,7 +4114,7 @@ private static:
             if (stc & STC.lazy_ ) params ~= "lazy ";
 
             // Take parameter type from the FuncInfo.
-            params ~= format("%s.PT[%s]", myFuncInfo, i);
+            params ~= formatCTFE("%s.PT[%s]", myFuncInfo, i);
 
             // Declare a parameter variable.
             params ~= " " ~ PARAMETER_VARIABLE_ID!(i);
