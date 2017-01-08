@@ -59,9 +59,10 @@ MAKE=c:\DigitalMars\bin\make.exe
 
 ## D compiler
 
-DMD=$(DIR)\bin\dmd
+#DMD=$(DIR)\bin\dmd
 #DMD=..\dmd
-DMD=dmd
+#DMD=dmd
+DMD=W:\external\DMD\windows\bin\ddmd.exe
 
 ## Location of where to write the html documentation files
 
