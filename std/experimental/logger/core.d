@@ -13,6 +13,7 @@ import std.concurrency;
 import std.format;
 import core.atomic;
 import core.sync.mutex : Mutex;
+import core.thread : Thread, ThreadID;
 
 import std.experimental.logger.filelogger;
 
@@ -20,6 +21,12 @@ shared static this()
 {
     stdSharedLoggerMutex = new Mutex;
 }
+
+// !!!
+// - Removed @safe from a bunch of the functions.
+// - Changed 'thisTid' to 'Thread.getThis().id()' and switched code to use ThreadID instead of Tid.
+//   This is because Tid allocates, and we don't want to allocate while logging.
+// !!!
 
 /** This template evaluates if the passed $(D LogLevel) is active.
 The previously described version statements are used to decide if the
@@ -647,13 +654,13 @@ private struct MsgRange
         this.log = log;
     }
 
-    void put(T)(T msg) @safe
+    void put(T)(T msg)
         if (isSomeString!T)
     {
         log.logMsgPart(msg);
     }
 
-    void put(dchar elem) @safe
+    void put(dchar elem)
     {
         import std.utf : encode;
         encode(this.buffer, elem);
@@ -736,7 +743,9 @@ abstract class Logger
         /// the $(D LogLevel) associated with the log message
         LogLevel logLevel;
         /// thread id of the log message
-        Tid threadId;
+        // !!!
+        ThreadID threadId;
+        // !!!
         /// the time the message was logged
         SysTime timestamp;
         /// the message of the log message
@@ -760,6 +769,12 @@ abstract class Logger
         };
 
         this.mutex = new Mutex();
+        // !!!
+        // IMPORTANT: Reserve enough so that we do not ever need to allocate.
+        // We call logf() as part of GC logging, so we can't ever allocate as part of logging.
+        this.msgBuf.reserve(1024);
+        this.msgAppender = appender(this.msgBuf);
+        // !!!
     }
 
     /** A custom logger must implement this method in order to work in a
@@ -770,7 +785,7 @@ abstract class Logger
 
     See_Also: beginLogMsg, logMsgPart, finishLogMsg
     */
-    abstract protected void writeLogMsg(ref LogEntry payload) @safe;
+    abstract protected void writeLogMsg(ref LogEntry payload);
 
     /* The default implementation will use an $(D std.array.appender)
     internally to construct the message string. This means dynamic,
@@ -814,19 +829,22 @@ abstract class Logger
     */
     protected void beginLogMsg(string file, int line, string funcName,
         string prettyFuncName, string moduleName, LogLevel logLevel,
-        Tid threadId, SysTime timestamp, Logger logger)
-        @safe
+        // !!!
+        ThreadID threadId, SysTime timestamp, Logger logger)
+        // !!!
     {
         static if (isLoggingActive)
         {
-            msgAppender = appender!string();
+            // !!!
+            msgAppender.clear();
+            // !!!
             header = LogEntry(file, line, funcName, prettyFuncName,
                 moduleName, logLevel, threadId, timestamp, null, logger);
         }
     }
 
     /** Logs a part of the log message. */
-    protected void logMsgPart(const(char)[] msg) @safe
+    protected void logMsgPart(const(char)[] msg)
     {
         static if (isLoggingActive)
         {
@@ -836,11 +854,13 @@ abstract class Logger
 
     /** Signals that the message has been written and no more calls to
     $(D logMsgPart) follow. */
-    protected void finishLogMsg() @safe
+    protected void finishLogMsg()
     {
         static if (isLoggingActive)
         {
-            header.msg = msgAppender.data;
+            // !!!
+            header.msg = msgAppender.data.assumeUnique();
+            // !!!
             this.writeLogMsg(header);
         }
     }
@@ -951,7 +971,7 @@ abstract class Logger
                 if (isLoggingEnabled(ll, this.logLevel_, globalLogLevel))
                 {
                     this.beginLogMsg(file, line, funcName, prettyFuncName,
-                        moduleName, ll, thisTid, Clock.currTime, this);
+                        moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
 
                     auto writer = MsgRange(this);
                     formatString(writer, args);
@@ -999,7 +1019,7 @@ abstract class Logger
                                      condition))
                 {
                     this.beginLogMsg(file, line, funcName, prettyFuncName,
-                        moduleName, ll, thisTid, Clock.currTime, this);
+                        moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
 
                     auto writer = MsgRange(this);
                     formatString(writer, args);
@@ -1048,7 +1068,7 @@ abstract class Logger
                                      condition))
                 {
                     this.beginLogMsg(file, line, funcName, prettyFuncName,
-                        moduleName, ll, thisTid, Clock.currTime, this);
+                        moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
 
                     auto writer = MsgRange(this);
                     formattedWrite(writer, msg, args);
@@ -1093,7 +1113,7 @@ abstract class Logger
                 if (isLoggingEnabled(ll, this.logLevel_, globalLogLevel))
                 {
                     this.beginLogMsg(file, line, funcName, prettyFuncName,
-                        moduleName, ll, thisTid, Clock.currTime, this);
+                        moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
 
                     auto writer = MsgRange(this);
                     formattedWrite(writer, msg, args);
@@ -1163,7 +1183,7 @@ abstract class Logger
             if (isLoggingEnabled(ll, this.logLevel_, globalLogLevel, condition))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, ll, thisTid, Clock.currTime, this);
+                    moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
 
                 auto writer = MsgRange(this);
                 formatString(writer, args);
@@ -1188,7 +1208,7 @@ abstract class Logger
                 condition) && ll >= moduleLogLevel!moduleName)
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, ll, thisTid, Clock.currTime, this);
+                    moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
                 auto writer = MsgRange(this);
                 formatString(writer, args);
 
@@ -1232,7 +1252,7 @@ abstract class Logger
             if (isLoggingEnabled(ll, this.logLevel_, globalLogLevel))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, ll, thisTid, Clock.currTime, this);
+                    moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
 
                 auto writer = MsgRange(this);
                 formatString(writer, args);
@@ -1257,7 +1277,7 @@ abstract class Logger
             if (isLoggingEnabled(ll, this.logLevel_, globalLogLevel))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, ll, thisTid, Clock.currTime, this);
+                    moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
                 auto writer = MsgRange(this);
                 formatString(writer, msg);
 
@@ -1304,7 +1324,7 @@ abstract class Logger
                 globalLogLevel, condition))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, this.logLevel_, thisTid, Clock.currTime, this);
+                    moduleName, this.logLevel_, Thread.getThis().id(), Clock.currTime, this);
 
                 auto writer = MsgRange(this);
                 formatString(writer, args);
@@ -1329,7 +1349,7 @@ abstract class Logger
                 condition))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, this.logLevel_, thisTid, Clock.currTime, this);
+                    moduleName, this.logLevel_, Thread.getThis().id(), Clock.currTime, this);
                 auto writer = MsgRange(this);
                 formatString(writer, args);
 
@@ -1376,7 +1396,7 @@ abstract class Logger
                 globalLogLevel))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, this.logLevel_, thisTid, Clock.currTime, this);
+                    moduleName, this.logLevel_, Thread.getThis().id(), Clock.currTime, this);
                 auto writer = MsgRange(this);
                 formatString(writer, args);
 
@@ -1399,7 +1419,7 @@ abstract class Logger
             if (isLoggingEnabled(this.logLevel_, this.logLevel_, globalLogLevel))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, this.logLevel_, thisTid, Clock.currTime, this);
+                    moduleName, this.logLevel_, Thread.getThis().id(), Clock.currTime, this);
                 auto writer = MsgRange(this);
                 formatString(writer, arg);
 
@@ -1446,7 +1466,7 @@ abstract class Logger
             if (isLoggingEnabled(ll, this.logLevel_, globalLogLevel, condition))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, ll, thisTid, Clock.currTime, this);
+                    moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
 
                 auto writer = MsgRange(this);
                 formattedWrite(writer, msg, args);
@@ -1492,7 +1512,7 @@ abstract class Logger
             if (isLoggingEnabled(ll, this.logLevel_, globalLogLevel))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, ll, thisTid, Clock.currTime, this);
+                    moduleName, ll, Thread.getThis().id(), Clock.currTime, this);
 
                 auto writer = MsgRange(this);
                 formattedWrite(writer, msg, args);
@@ -1540,7 +1560,7 @@ abstract class Logger
                 condition))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, this.logLevel_, thisTid, Clock.currTime, this);
+                    moduleName, this.logLevel_, Thread.getThis().id(), Clock.currTime, this);
 
                 auto writer = MsgRange(this);
                 formattedWrite(writer, msg, args);
@@ -1584,7 +1604,7 @@ abstract class Logger
                 globalLogLevel))
             {
                 this.beginLogMsg(file, line, funcName, prettyFuncName,
-                    moduleName, this.logLevel_, thisTid, Clock.currTime, this);
+                    moduleName, this.logLevel_, Thread.getThis().id(), Clock.currTime, this);
 
                 auto writer = MsgRange(this);
                 formattedWrite(writer, msg, args);
@@ -1601,7 +1621,10 @@ abstract class Logger
     private shared LogLevel logLevel_ = LogLevel.info;
     private Mutex mutex;
 
-    protected Appender!string msgAppender;
+    // !!!
+    protected char[] msgBuf = null;
+    protected Appender!(char[]) msgAppender;
+    // !!!
     protected LogEntry header;
 }
 

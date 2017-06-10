@@ -3,6 +3,10 @@ module std.experimental.logger.filelogger;
 
 import std.stdio;
 import std.experimental.logger.core;
+// !!!
+import core.thread : ThreadID;
+// !!!
+
 
 /** This $(D Logger) implementation writes log messages to the associated
 file. The name of the file has to be passed on construction time. If the file
@@ -72,10 +76,13 @@ class FileLogger : Logger
     without requiring heap allocated memory. Additionally, the $(D FileLogger)
     local mutex is logged to serialize the log calls.
     */
+    // !!!
+    // threadId is a ThreadID now instead of a Tid
     override protected void beginLogMsg(string file, int line, string funcName,
         string prettyFuncName, string moduleName, LogLevel logLevel,
-        Tid threadId, SysTime timestamp, Logger logger)
+        ThreadID threadId, SysTime timestamp, Logger logger)
         @safe
+    // !!!
     {
         import std.string : lastIndexOf;
         // !!!

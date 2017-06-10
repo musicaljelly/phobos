@@ -5193,14 +5193,14 @@ void main()
 // !!!
 // Mark as debug so that we can use impure functions inside of pure ones.
 // We have to use a specific debug identifier so we don't enable all the other debug code in druntime and phobos
-debug (FastCompilingFormat)
+debug (GameDebug)
 {
     // Don't change this function signature, or we'll get a linker error when calling existing functions that expect to call
     // a function that mangles to this exact signature.
     // Marked as @trusted so that @safe functions can still call this.
     @trusted immutable(Char)[] format(Char)(in Char[] fmt, ...) if (isSomeChar!Char)
     {
-        debug (FastCompilingFormat)
+        debug (GameDebug)
         {
             string outputString;
 
@@ -5212,19 +5212,11 @@ debug (FastCompilingFormat)
             // Add fmt on to the beginning of the argument list
             TypeInfo[] allArguments = typeid(Char[]) ~ _arguments;
 
-            try
-            {
-                // Use &fmt so that fmt is included in the variadic arguments.
-                // Note that this assumes arguments are laid out in the usual manner on the stack.
-                // If the calling convention were to ever change in a way that changed the argument layout, this
-                // assumption would no longer hold and this code would break.
-                doFormat(&putc, allArguments, cast(char*) &fmt);
-            }
-            catch (FormatException e)
-            {
-                import std.exception : assumeUnique;
-                return "EXCEPTION WHILE FORMATTING: " ~ fmt.assumeUnique();
-            }
+            // Use &fmt so that fmt is included in the variadic arguments.
+            // Note that this assumes arguments are laid out in the usual manner on the stack.
+            // If the calling convention were to ever change in a way that changed the argument layout, this
+            // assumption would no longer hold and this code would break.
+            doFormat(&putc, allArguments, cast(char*) &fmt);
 
             return outputString;
         }

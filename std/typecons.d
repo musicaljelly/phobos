@@ -6134,6 +6134,18 @@ struct Typedef(T, T init = T.init, string cookie=null)
         return cast(T2)Typedef_payload;
     }
 
+    // !!!
+    import std.traits : isScalarType;
+    static if (isScalarType!T)
+    {
+        string toString()
+        {
+            import std.conv : to;
+            return to!string(Typedef_payload);
+        }
+    }
+    // !!!
+
     mixin Proxy!Typedef_payload;
 }
 
@@ -7066,6 +7078,20 @@ public:
     {
         return opBinary!op(flag);
     }
+
+    // !!!
+    // Add something that explicitly returns bool, so we don't need to always cast the results of one of the above
+    // functions to a bool before handing it to a function that expects a bool.
+    bool isSet(E flag) const
+    {
+        return cast(bool)(this & flag);
+    }
+
+    bool isSet(BitFlags flags) const
+    {
+        return cast(bool)(this & flags);
+    }
+    // !!!
 }
 
 /// BitFlags can be manipulated with the usual operators

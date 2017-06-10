@@ -43,13 +43,13 @@ DRUNTIMELIB=$(DRUNTIME)\lib\druntime.lib
 
 ## Flags for dmd D compiler
 
-DFLAGS=-conf= -g -gs -debug=FastCompilingFormat -release -w -dip25 -I$(DRUNTIME)\import
+DFLAGS=-conf= -g -gs -debug=GameDebug -release -w -dip25 -I$(DRUNTIME)\import
 #DFLAGS=-unittest -g
 #DFLAGS=-unittest -cov -g
 
 ## Flags for compiling unittests
 
-UDFLAGS=-conf= -w -g -gs -release -dip25 -I$(DRUNTIME)\import
+UDFLAGS=-conf= -w -g -gs -debug=GameDebug -release -dip25 -I$(DRUNTIME)\import
 
 ## C compiler
 
