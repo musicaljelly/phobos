@@ -1178,7 +1178,8 @@ Throws: $(D Exception) if the file is not opened.
 
         private static T wenforce(T)(T cond, string str)
         {
-            import std.windows.syserror : sysErrorString, GetLastError;
+            import std.windows.syserror : sysErrorString;
+            import core.sys.windows.windows : GetLastError;
 
             if (cond) return cond;
             throw new Exception(str ~ ": " ~ sysErrorString(GetLastError()));
@@ -1804,8 +1805,8 @@ is recommended if you want to process a complete file.
     }
 
 /**
- Returns a temporary file by calling $(HTTP
- cplusplus.com/reference/clibrary/cstdio/_tmpfile.html, _tmpfile).
+ Returns a temporary file by calling
+ $(HTTP cplusplus.com/reference/clibrary/cstdio/_tmpfile.html, _tmpfile).
  Note that the created file has no $(LREF name).*/
     static File tmpfile() @safe
     {
@@ -2354,7 +2355,6 @@ $(REF readText, std,file)
     Range primitives may throw $(D StdioException) on I/O error.
 
     Params:
-        file = file handle to parse from
         format = tuple record $(REF_ALTTEXT _format, formattedRead, std, _format)
 
     Returns:
@@ -4341,7 +4341,7 @@ __gshared
 {
     /** The standard input stream.
         Bugs:
-            Due to $(WEB https://issues.dlang.org/show_bug.cgi?id=15768, bug 15768),
+            Due to $(LINK2 https://issues.dlang.org/show_bug.cgi?id=15768, bug 15768),
             it is thread un-safe to reassign `stdin` to a different `File` instance
             than the default.
      */
@@ -4350,7 +4350,10 @@ __gshared
     @safe unittest
     {
         // Read stdin, sort lines, write to stdout
-        import std.stdio, std.array, std.algorithm : sort, copy;
+        import std.array : array;
+        import std.algorithm.sorting : sort;
+        import std.algorithm.mutation : copy;
+        import std.typecons : Yes;
 
         void main() {
             stdin                       // read from stdin
@@ -4365,7 +4368,7 @@ __gshared
     /**
         The standard output stream.
         Bugs:
-            Due to $(WEB https://issues.dlang.org/show_bug.cgi?id=15768, bug 15768),
+            Due to $(LINK2 https://issues.dlang.org/show_bug.cgi?id=15768, bug 15768),
             it is thread un-safe to reassign `stdout` to a different `File` instance
             than the default.
     */
@@ -4373,7 +4376,7 @@ __gshared
     /**
         The standard error stream.
         Bugs:
-            Due to $(WEB https://issues.dlang.org/show_bug.cgi?id=15768, bug 15768),
+            Due to $(LINK2 https://issues.dlang.org/show_bug.cgi?id=15768, bug 15768),
             it is thread un-safe to reassign `stderr` to a different `File` instance
             than the default.
     */

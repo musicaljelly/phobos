@@ -1149,6 +1149,7 @@ functions.
 /// Ditto
 unittest
 {
+    import std.experimental.logger.filelogger : FileLogger;
     import std.file : deleteme, remove;
     Logger l = stdThreadLocalLog;
     stdThreadLocalLog = new FileLogger(deleteme ~ "-someFile.log");

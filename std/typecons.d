@@ -328,7 +328,7 @@ private template sharedToString(alias field)
 }
 
 /**
-Tuple of values, for example $(D Tuple!(int, string)) is a record that
+_Tuple of values, for example $(D Tuple!(int, string)) is a record that
 stores an $(D int) and a $(D string). $(D Tuple) can be used to bundle
 values together, notably when returning multiple values from a
 function. If $(D obj) is a `Tuple`, the individual members are
@@ -336,9 +336,11 @@ accessible with the syntax $(D obj[0]) for the first field, $(D obj[1])
 for the second, and so on.
 
 The choice of zero-based indexing instead of one-base indexing was
-motivated by the ability to use value `Tuple`s with various compile-time
+motivated by the ability to use value tuples with various compile-time
 loop constructs (e.g. $(REF AliasSeq, std,meta) iteration), all of which use
 zero-based indexing.
+
+See_Also: $(LREF tuple).
 
 Params:
     Specs = A list of types (and optionally, member names) that the `Tuple` contains.
@@ -848,7 +850,7 @@ template Tuple(Specs...)
         if (is(typeof(translate) : V[K], V, K) && isSomeString!V &&
                 (isSomeString!K || is(K : size_t)))
         {
-            import std.range: ElementType;
+            import std.range : ElementType;
             static if (isSomeString!(ElementType!(typeof(translate.keys))))
             {
                 {
@@ -865,9 +867,9 @@ template Tuple(Specs...)
                     {
                         import std.array : empty;
                         auto names = [fieldNames];
-                        foreach(ref n; names)
+                        foreach (ref n; names)
                             if (!n.empty)
-                                if(auto p = n in translate)
+                                if (auto p = n in translate)
                                     n = *p;
                         return names;
                     }()));
@@ -886,7 +888,7 @@ template Tuple(Specs...)
                 return this.rename!(aliasSeqOf!(
                     {
                         auto names = [fieldNames];
-                        foreach(k, v; translate)
+                        foreach (k, v; translate)
                             names[k] = v;
                         return names;
                     }()));
@@ -1171,15 +1173,15 @@ template Tuple(Specs...)
 }
 
 /**
-    Create a copy of a `Tuple` with its fields in reverse order.
+    Creates a copy of a $(LREF Tuple) with its fields in _reverse order.
 
     Params:
         t = The `Tuple` to copy.
 
     Returns:
-        A copy of `t` with its fields in reverse order.
+        A new `Tuple`.
  */
-ReverseTupleType!T reverse(T)(T t)
+auto reverse(T)(T t)
     if (isTuple!T)
 {
     import std.meta : Reverse;
@@ -1188,7 +1190,7 @@ ReverseTupleType!T reverse(T)(T t)
     // @@@BUG@@@ 9929 Need 'this' when calling template with expanded tuple
     // return tuple(Reverse!(t.expand));
 
-    typeof(return) result;
+    ReverseTupleType!T result;
     auto tup = t.expand;
     result.expand = Reverse!tup;
     return result;
@@ -1672,24 +1674,26 @@ unittest
 }
 
 /**
-    Constructs a $(D Tuple) object instantiated and initialized according to
+    Constructs a $(LREF Tuple) object instantiated and initialized according to
     the given arguments.
 
     Params:
-        Names = A list of strings naming each successive field of the `Tuple`.
+        Names = An optional list of strings naming each successive field of the `Tuple`.
                 Each name matches up with the corresponding field given by `Args`.
                 A name does not have to be provided for every field, but as
                 the names must proceed in order, it is not possible to skip
                 one field and name the next after it.
-
+*/
+template tuple(Names...)
+{
+    /**
+    Params:
         args = Values to initialize the `Tuple` with. The `Tuple`'s type will
                be inferred from the types of the values given.
 
     Returns:
         A new `Tuple` with its type inferred from the arguments given.
-*/
-template tuple(Names...)
-{
+     */
     auto tuple(Args...)(Args args)
     {
         static if (Names.length == 0)
@@ -2336,6 +2340,12 @@ $(D this) must not be in the null state.
     alias get this;
 }
 
+/// ditto
+auto nullable(T)(T t)
+{
+    return Nullable!T(t);
+}
+
 ///
 @safe unittest
 {
@@ -2366,6 +2376,20 @@ $(D this) must not be in the null state.
     {
         //Add the customer to the database
     }
+}
+
+///
+@system unittest
+{
+    import std.exception : assertThrown;
+
+    auto a = 42.nullable;
+    assert(!a.isNull);
+    assert(a.get == 42);
+
+    a.nullify();
+    assert(a.isNull);
+    assertThrown!Throwable(a.get);
 }
 
 @system unittest
@@ -2842,6 +2866,13 @@ $(D this) must not be in the null state.
     alias get this;
 }
 
+/// ditto
+auto nullable(alias nullValue, T)(T t)
+    if (is (typeof(nullValue) == T))
+{
+    return Nullable!(T, nullValue)(t);
+}
+
 ///
 @safe unittest
 {
@@ -2872,6 +2903,8 @@ $(D this) must not be in the null state.
     //And there's no overhead
     static assert(Nullable!(size_t, size_t.max).sizeof == size_t.sizeof);
 }
+
+///
 @system unittest
 {
     import std.exception : assertThrown;
@@ -2884,13 +2917,16 @@ $(D this) must not be in the null state.
     assert(a == 5);
     static assert(a.sizeof == int.sizeof);
 }
+
+///
 @safe unittest
 {
-    auto a = Nullable!(int, int.min)(8);
+    auto a = nullable!(int.min)(8);
     assert(a == 8);
     a.nullify();
     assert(a.isNull);
 }
+
 @safe unittest
 {
     static int f(in Nullable!(int, int.min) x) {
@@ -3163,12 +3199,19 @@ $(D this) must not be in the null state.
     alias get this;
 }
 
+/// ditto
+auto nullableRef(T)(T* t)
+{
+    return NullableRef!T(t);
+}
+
+///
 @system unittest
 {
     import std.exception : assertThrown;
 
     int x = 5, y = 7;
-    auto a = NullableRef!(int)(&x);
+    auto a = nullableRef(&x);
     assert(!a.isNull);
     assert(a == 5);
     assert(x == 5);
@@ -3192,7 +3235,7 @@ $(D this) must not be in the null state.
         return x.isNull ? 42 : x.get;
     }
     int x = 5;
-    auto a = NullableRef!int(&x);
+    auto a = nullableRef(&x);
     assert(f(a) == 5);
     a.nullify();
     assert(f(a) == 42);
