@@ -5200,6 +5200,8 @@ debug (GameDebug)
     // Marked as @trusted so that @safe functions can still call this.
     @trusted immutable(Char)[] format(Char)(in Char[] fmt, ...) if (isSomeChar!Char)
     {
+        // We need the second debug block inside the function so that pure functions can call us (since impure statements
+        // are still allowed inside pure functions if they're wrapped in debug blocks.
         debug (GameDebug)
         {
             string outputString;

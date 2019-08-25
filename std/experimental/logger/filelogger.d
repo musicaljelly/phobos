@@ -3,10 +3,6 @@ module std.experimental.logger.filelogger;
 
 import std.stdio;
 import std.experimental.logger.core;
-// !!!
-import core.thread : ThreadID;
-// !!!
-
 
 /** This $(D Logger) implementation writes log messages to the associated
 file. The name of the file has to be passed on construction time. If the file
@@ -77,10 +73,10 @@ class FileLogger : Logger
     local mutex is logged to serialize the log calls.
     */
     // !!!
-    // threadId is a ThreadID now instead of a Tid
+    // Removed Tid
     override protected void beginLogMsg(string file, int line, string funcName,
         string prettyFuncName, string moduleName, LogLevel logLevel,
-        ThreadID threadId, SysTime timestamp, Logger logger)
+        SysTime timestamp, Logger logger)
         @safe
     // !!!
     {
@@ -123,9 +119,12 @@ class FileLogger : Logger
     */
     override protected void writeLogMsg(ref LogEntry payload)
     {
+        // !!!
+        // Removed Tid
         this.beginLogMsg(payload.file, payload.line, payload.funcName,
             payload.prettyFuncName, payload.moduleName, payload.logLevel,
-            payload.threadId, payload.timestamp, payload.logger);
+            payload.timestamp, payload.logger);
+        // !!!
         this.logMsgPart(payload.msg);
         this.finishLogMsg();
     }

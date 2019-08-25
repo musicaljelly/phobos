@@ -29,8 +29,10 @@ import std.traits;
 // Also helps with missing imports errors.
 package template convFormat()
 {
-    import std.format : format;
-    alias convFormat = format;
+    import std.format : formatCTFE;
+    // !!!
+    alias convFormat = formatCTFE;
+    // !!!
 }
 
 /* ************* Exceptions *************** */

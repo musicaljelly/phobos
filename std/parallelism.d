@@ -92,6 +92,17 @@ import std.range;
 import std.traits;
 import std.typecons;
 
+// !!!
+immutable int MAX_WORKER_THREADS = 128;
+
+extern (C)
+{
+    void InitScrapheapOnThisThread(size_t scrapheapSize);
+    void ResetScrapheap();
+    size_t GetScrapheapHighWatermark();
+}
+// !!!
+
 version(OSX)
 {
     version = useSysctlbyname;
@@ -1028,6 +1039,12 @@ private:
     Mutex queueMutex;
     Mutex waiterMutex;  // For waiterCondition
 
+    // !!!
+    // Used when calling blockUntilAllWorkersIdle() to track which threads have become idle
+    // We use these ubytes like bools, but use ubyte for simplicity so we can piggyback off of the existing atomicSetUbyte et al
+    ubyte[MAX_WORKER_THREADS] idleThreadsReportedIn;
+    // !!!
+
     // The instanceStartIndex of the next instance that will be created.
     __gshared static size_t nextInstanceIndex = 1;
 
@@ -1044,7 +1061,10 @@ private:
     {
         running,
         finishing,
-        stopNow
+        stopNow,
+        // !!!
+        blockUntilIdle
+        // !!!
     }
 
     void doJob(AbstractTask* job)
@@ -1099,6 +1119,13 @@ private:
             nextThreadIndex++;
         }
 
+        // !!!
+        static immutable size_t SCRAPHEAP_SIZE = 2_000_000;
+        InitScrapheapOnThisThread(SCRAPHEAP_SIZE);
+        // No need to destroy the scrapheap, we're shutting down anyway so it's fine to leak memory.
+        // The main thread will take care of doing the global scrapheap shutdown.
+        // !!!
+
         executeWorkLoop();
     }
 
@@ -1117,11 +1144,23 @@ private:
                     atomicSetUbyte(status, PoolState.stopNow);
                     return;
                 }
+                // !!!
+                else if (atomicReadUbyte(status) == PoolState.blockUntilIdle)
+                {
+                    atomicSetUbyte(idleThreadsReportedIn[workerIndex()], 1);
+                    while (atomicReadUbyte(status) == PoolState.blockUntilIdle)
+                    {
+                        Thread.yield();
+                    }
+                }
+                // !!!
             }
             else
             {
                 doJob(task);
             }
+
+            ResetScrapheap();
         }
     }
 
@@ -1429,6 +1468,12 @@ public:
     */
     this(size_t nWorkers) @trusted
     {
+        // !!!
+        // Clamp it so we don't overrun the idleThreadsReportedIn array
+        import std.algorithm.comparison : max;
+        nWorkers = min(nWorkers, MAX_WORKER_THREADS);
+        // !!!
+
         synchronized(typeid(TaskPool))
         {
             instanceStartIndex = nextInstanceIndex;
@@ -1446,12 +1491,16 @@ public:
         waiterCondition = new Condition(waiterMutex);
 
         pool = new ParallelismThread[nWorkers];
-        foreach (ref poolThread; pool)
+        // !!!
+        import std.format : format;
+        foreach (i, ref poolThread; pool)
         {
             poolThread = new ParallelismThread(&startWorkLoop);
             poolThread.pool = this;
             poolThread.start();
+            poolThread.name = format("Worker thread %s", i + 1);
         }
+        // !!!
     }
 
     /**
@@ -3068,13 +3117,26 @@ public:
     queue is empty, or if you speculatively executed some tasks and no longer
     need the results.
      */
-    void stop() @trusted
+    // !!!
+    // Added option for stop() to block until all threads are joined
+    void stop(bool blocking = false) @trusted
     {
-        queueLock();
-        scope(exit) queueUnlock();
-        atomicSetUbyte(status, PoolState.stopNow);
-        notifyAll();
+        {
+            queueLock();
+            scope(exit) queueUnlock();
+            atomicSetUbyte(status, PoolState.stopNow);
+            notifyAll();
+        }
+
+        if (blocking)
+        {
+            foreach (t; pool)
+            {
+                t.join();
+            }
+        }
     }
+    // !!!
 
     /**
     Signals worker threads to terminate when the queue becomes empty.
@@ -3118,6 +3180,44 @@ public:
             }
         }
     }
+
+    // !!!
+    void blockUntilAllWorkersIdle()
+    {
+        atomicSetUbyte(status, PoolState.blockUntilIdle);
+        scope(exit) atomicSetUbyte(status, PoolState.running);
+
+        notifyAll();
+
+        // Block until all work is done and the task queue is empty.
+        while (true)
+        {
+            // Start at 1 because we use the workerIndex as our index into the array, and the workerIndex is
+            // from 1 to numWorkers inclusive (0 is reserved for "this thread is not part of the pool").
+            bool allIdle = true;
+            for (int i = 1; i < pool.length + 1; i++)
+            {
+                if (atomicReadUbyte(idleThreadsReportedIn[i]) == 0)
+                {
+                    allIdle = false;
+                    break;
+                }
+            }
+
+            if (allIdle)
+            {
+                for (int i = 0; i < MAX_WORKER_THREADS; i++)
+                {
+                    atomicSetUbyte(idleThreadsReportedIn[i], 0);
+                }
+
+                return;
+            }
+
+            Thread.yield();
+        }
+    }
+    // !!!
 
     /// Returns the number of worker threads in the pool.
     @property size_t size() @safe const pure nothrow
