@@ -22,10 +22,11 @@ $(LI The current implementation is optimized for little endian architectures.
   less uniform distribution.)
 )
 
-This module conforms to the APIs defined in $(D std.digest.digest).
+This module conforms to the APIs defined in $(MREF std, digest).
 
-This module publicly imports $(D std.digest.digest) and can be used as a stand-alone module.
+This module publicly imports $(MREF std, digest) and can be used as a stand-alone module.
 
+Source: $(PHOBOSSRC std/digest/_murmurhash.d)
 License: $(HTTP www.boost.org/LICENSE_1_0.txt, Boost License 1.0).
 Authors: Guillaume Chatelet
 References: $(LINK2 https://github.com/aappleby/smhasher, Reference implementation)
@@ -38,17 +39,18 @@ $(BR) $(LINK2 https://en.wikipedia.org/wiki/MurmurHash, Wikipedia)
 module std.digest.murmurhash;
 
 ///
-unittest
+@safe unittest
 {
     // MurmurHash3!32, MurmurHash3!(128, 32) and MurmurHash3!(128, 64) implement
-    // the std.digest.digest Template API.
+    // the std.digest Template API.
     static assert(isDigest!(MurmurHash3!32));
     // The convenient digest template allows for quick hashing of any data.
     ubyte[4] hashed = digest!(MurmurHash3!32)([1, 2, 3, 4]);
+    assert(hashed == [0, 173, 69, 68]);
 }
 
 ///
-unittest
+@safe unittest
 {
     // One can also hash ubyte data piecewise by instanciating a hasher and call
     // the 'put' method.
@@ -62,10 +64,11 @@ unittest
     // - the remaining bits are processed
     // - the hash gets finalized
     auto hashed = hasher.finish();
+    assert(hashed == [181, 151, 88, 252]);
 }
 
 ///
-unittest
+@safe unittest
 {
     // Using `putElements`, `putRemainder` and `finalize` you gain full
     // control over which part of the algorithm to run.
@@ -86,9 +89,10 @@ unittest
     hasher.finalize();
     // Finally get the hashed value.
     auto hashed = hasher.getBytes();
+    assert(hashed == [188, 165, 108, 2]);
 }
 
-public import std.digest.digest;
+public import std.digest;
 
 @safe:
 
@@ -554,7 +558,7 @@ struct MurmurHash3(uint size /* 32 or 128 */ , uint opt = size_t.sizeof == 8 ? 6
         static assert(isUnsigned!T);
         debug assert(y >= 0 && y <= (T.sizeof * 8));
     }
-    body
+    do
     {
         return ((x << y) | (x >> ((T.sizeof * 8) - y)));
     }
@@ -632,7 +636,7 @@ version (unittest)
     }
 }
 
-unittest
+@safe unittest
 {
     // dfmt off
     checkResult!(MurmurHash3!32)([
@@ -666,7 +670,7 @@ unittest
     // dfmt on
 }
 
-unittest
+@safe unittest
 {
     // dfmt off
     checkResult!(MurmurHash3!(128,32))([
@@ -700,7 +704,7 @@ unittest
     // dfmt on
 }
 
-unittest
+@safe unittest
 {
     // dfmt off
     checkResult!(MurmurHash3!(128,64))([
@@ -734,14 +738,14 @@ unittest
     // dfmt on
 }
 
-unittest
+@safe unittest
 {
     // Pushing unaligned data and making sure the result is still coherent.
     void testUnalignedHash(H)()
     {
         immutable ubyte[1025] data = 0xAC;
-        immutable alignedHash = digest!H(data[0 .. $ - 1]); // 0..1023
-        immutable unalignedHash = digest!H(data[1 .. $]); // 1..1024
+        immutable alignedHash = digest!H(data[0 .. $ - 1]); // 0 .. 1023
+        immutable unalignedHash = digest!H(data[1 .. $]); // 1 .. 1024
         assert(alignedHash == unalignedHash);
     }
 

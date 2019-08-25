@@ -4,12 +4,12 @@
  * Support for Base64 encoding and decoding.
  *
  * This module provides two default implementations of Base64 encoding,
- * $(D $(LREF Base64)) with a standard encoding alphabet, and a variant
- * $(D $(LREF Base64URL)) that has a modified encoding alphabet designed to be
+ * $(LREF Base64) with a standard encoding alphabet, and a variant
+ * $(LREF Base64URL) that has a modified encoding alphabet designed to be
  * safe for embedding in URLs and filenames.
  *
  * Both variants are implemented as instantiations of the template
- * $(D $(LREF Base64Impl)). Most users will not need to use this template
+ * $(LREF Base64Impl). Most users will not need to use this template
  * directly; however, it can be used to create customized Base64 encodings,
  * such as one that omits padding characters, or one that is safe to embed
  * inside a regular expression.
@@ -76,7 +76,7 @@ import std.traits;     // isArray
 /**
  * Implementation of standard _Base64 encoding.
  *
- * See $(D $(LREF Base64Impl)) for a description of available methods.
+ * See $(LREF Base64Impl) for a description of available methods.
  */
 alias Base64 = Base64Impl!('+', '/');
 
@@ -92,7 +92,7 @@ alias Base64 = Base64Impl!('+', '/');
 /**
  * Variation of Base64 encoding that is safe for use in URLs and filenames.
  *
- * See $(D $(LREF Base64Impl)) for a description of available methods.
+ * See $(LREF Base64Impl) for a description of available methods.
  */
 alias Base64URL = Base64Impl!('-', '_');
 
@@ -104,14 +104,30 @@ alias Base64URL = Base64Impl!('-', '_');
     assert(Base64URL.decode("g9cwegE_") == data);
 }
 
+/**
+ * Unpadded variation of Base64 encoding that is safe for use in URLs and
+ * filenames, as used in RFCs 4648 and 7515 (JWS/JWT/JWE).
+ *
+ * See $(LREF Base64Impl) for a description of available methods.
+ */
+alias Base64URLNoPadding = Base64Impl!('-', '_', Base64.NoPadding);
+
+///
+@safe unittest
+{
+    ubyte[] data = [0x83, 0xd7, 0x30, 0x7b, 0xef];
+    assert(Base64URLNoPadding.encode(data) == "g9cwe-8");
+    assert(Base64URLNoPadding.decode("g9cwe-8") == data);
+}
 
 /**
  * Template for implementing Base64 encoding and decoding.
  *
  * For most purposes, direct usage of this template is not necessary; instead,
- * this module provides two default implementations: $(D $(LREF Base64)) and
- * $(D $(LREF Base64URL)), that implement basic Base64 encoding and a variant
- * intended for use in URLs and filenames, respectively.
+ * this module provides default implementations: $(LREF Base64), implementing
+ * basic Base64 encoding, and $(LREF Base64URL) and $(LREF Base64URLNoPadding),
+ * that implement the Base64 variant for use in URLs and filenames, with
+ * and without padding, respectively.
  *
  * Customized Base64 encoding schemes can be implemented by instantiating this
  * template with the appropriate arguments. For example:
@@ -178,7 +194,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         ubyte[] data = [0x1a, 0x2b, 0x3c, 0x4d, 0x5d, 0x6e];
 
         // Allocate a buffer large enough to hold the encoded string.
-        auto buf = new char[encodeLength(data.length)];
+        auto buf = new char[Base64.encodeLength(data.length)];
 
         Base64.encode(data, buf);
         assert(buf == "Gis8TV1u");
@@ -211,7 +227,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
     {
         assert(result.length == encodeLength(source.length), "The length of result is different from Base64");
     }
-    body
+    do
     {
         immutable srcLen = source.length;
         if (srcLen == 0)
@@ -222,7 +238,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         auto      bufptr = buffer.ptr;
         auto      srcptr = source.ptr;
 
-        foreach (Unused; 0..blocks)
+        foreach (Unused; 0 .. blocks)
         {
             immutable val = srcptr[0] << 16 | srcptr[1] << 8 | srcptr[2];
             *bufptr++ = EncodeMap[val >> 18       ];
@@ -256,7 +272,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         }
 
         // encode method can't assume buffer length. So, slice needed.
-        return buffer[0..bufptr - buffer.ptr];
+        return buffer[0 .. bufptr - buffer.ptr];
     }
 
     ///
@@ -294,7 +310,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         // @@@BUG@@@ D's DbC can't caputre an argument of function and store the result of precondition.
         //assert(result.length == encodeLength(source.length), "The length of result is different from Base64");
     }
-    body
+    do
     {
         immutable srcLen = source.length;
         if (srcLen == 0)
@@ -304,7 +320,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         immutable remain = srcLen % 3;
         auto      bufptr = buffer.ptr;
 
-        foreach (Unused; 0..blocks)
+        foreach (Unused; 0 .. blocks)
         {
             immutable v1 = source.front; source.popFront();
             immutable v2 = source.front; source.popFront();
@@ -353,7 +369,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
             );
 
         // encode method can't assume buffer length. So, slice needed.
-        return buffer[0..bufptr - buffer.ptr];
+        return buffer[0 .. bufptr - buffer.ptr];
     }
 
 
@@ -381,7 +397,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
     {
         assert(result == encodeLength(source.length), "The number of put is different from the length of Base64");
     }
-    body
+    do
     {
         immutable srcLen = source.length;
         if (srcLen == 0)
@@ -392,7 +408,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         auto      srcptr = source.ptr;
         size_t    pcount;
 
-        foreach (Unused; 0..blocks)
+        foreach (Unused; 0 .. blocks)
         {
             immutable val = srcptr[0] << 16 | srcptr[1] << 8 | srcptr[2];
             put(range, EncodeMap[val >> 18       ]);
@@ -470,7 +486,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         // @@@BUG@@@ Workaround for DbC problem.
         //assert(result == encodeLength(source.length), "The number of put is different from the length of Base64");
     }
-    body
+    do
     {
         immutable srcLen = source.length;
         if (srcLen == 0)
@@ -480,7 +496,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         immutable remain = srcLen % 3;
         size_t    pcount;
 
-        foreach (Unused; 0..blocks)
+        foreach (Unused; 0 .. blocks)
         {
             immutable v1 = source.front; source.popFront();
             immutable v2 = source.front; source.popFront();
@@ -668,7 +684,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
 
                 encoder.range_   = range_.save;
                 encoder.buffer_  = buffer_.dup;
-                encoder.encoded_ = encoder.buffer_[0..encoded_.length];
+                encoder.encoded_ = encoder.buffer_[0 .. encoded_.length];
 
                 return encoder;
             }
@@ -989,7 +1005,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         immutable expect = realDecodeLength(source);
         assert(result.length == expect, "The length of result is different from the expected length");
     }
-    body
+    do
     {
         immutable srcLen = source.length;
         if (srcLen == 0)
@@ -1001,7 +1017,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         auto      srcptr = source.ptr;
         auto      bufptr = buffer.ptr;
 
-        foreach (Unused; 0..blocks)
+        foreach (Unused; 0 .. blocks)
         {
             immutable v1 = decodeChar(*srcptr++);
             immutable v2 = decodeChar(*srcptr++);
@@ -1037,7 +1053,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
             }
         }
 
-        return buffer[0..bufptr - buffer.ptr];
+        return buffer[0 .. bufptr - buffer.ptr];
     }
 
     ///
@@ -1075,7 +1091,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         //immutable expect = decodeLength(source.length) - 2;
         //assert(result.length >= expect, "The length of result is smaller than expected length");
     }
-    body
+    do
     {
         immutable srcLen = source.length;
         if (srcLen == 0)
@@ -1086,7 +1102,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         immutable blocks = srcLen / 4;
         auto      bufptr = buffer.ptr;
 
-        foreach (Unused; 0..blocks)
+        foreach (Unused; 0 .. blocks)
         {
             immutable v1 = decodeChar(source.front); source.popFront();
             immutable v2 = decodeChar(source.front); source.popFront();
@@ -1134,7 +1150,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
                 "The length of result is smaller than expected length"
             );
 
-        return buffer[0..bufptr - buffer.ptr];
+        return buffer[0 .. bufptr - buffer.ptr];
     }
 
 
@@ -1166,7 +1182,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         immutable expect = realDecodeLength(source);
         assert(result == expect, "The result of decode is different from the expected");
     }
-    body
+    do
     {
         immutable srcLen = source.length;
         if (srcLen == 0)
@@ -1178,7 +1194,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         auto      srcptr = source.ptr;
         size_t    pcount;
 
-        foreach (Unused; 0..blocks)
+        foreach (Unused; 0 .. blocks)
         {
             immutable v1 = decodeChar(*srcptr++);
             immutable v2 = decodeChar(*srcptr++);
@@ -1255,7 +1271,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         //immutable expect = decodeLength(source.length) - 2;
         //assert(result >= expect, "The length of result is smaller than expected length");
     }
-    body
+    do
     {
         immutable srcLen = source.length;
         if (srcLen == 0)
@@ -1266,7 +1282,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         immutable blocks = srcLen / 4;
         size_t    pcount;
 
-        foreach (Unused; 0..blocks)
+        foreach (Unused; 0 .. blocks)
         {
             immutable v1 = decodeChar(source.front); source.popFront();
             immutable v2 = decodeChar(source.front); source.popFront();
@@ -1447,7 +1463,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
 
                 decoder.range_   = range_.save;
                 decoder.buffer_  = buffer_.dup;
-                decoder.decoded_ = decoder.buffer_[0..decoded_.length];
+                decoder.decoded_ = decoder.buffer_[0 .. decoded_.length];
 
                 return decoder;
             }
@@ -1717,10 +1733,25 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         if (chr > 0x7f)
             throw new Base64Exception("Base64-encoded character must be a single byte");
 
-        return decodeChar(cast(char)chr);
+        return decodeChar(cast(char) chr);
     }
 }
 
+///
+@safe unittest
+{
+    import std.string : representation;
+
+    // pre-defined: alias Base64 = Base64Impl!('+', '/');
+    ubyte[] emptyArr;
+    assert(Base64.encode(emptyArr) == "");
+    assert(Base64.encode("f".representation) == "Zg==");
+    assert(Base64.encode("foo".representation) == "Zm9v");
+
+    alias Base64Re = Base64Impl!('!', '=', Base64.NoPadding);
+    assert(Base64Re.encode("f".representation) == "Zg");
+    assert(Base64Re.encode("foo".representation) == "Zm9v");
+}
 
 /**
  * Exception thrown upon encountering Base64 encoding or decoding errors.
@@ -1734,11 +1765,18 @@ class Base64Exception : Exception
     }
 }
 
+///
+@system unittest
+{
+    import std.exception : assertThrown;
+    assertThrown!Base64Exception(Base64.decode("ab|c"));
+}
+
 
 @system unittest
 {
-    import std.algorithm.sorting : sort;
     import std.algorithm.comparison : equal;
+    import std.algorithm.sorting : sort;
     import std.conv;
     import std.file;
     import std.stdio;
@@ -1985,17 +2023,17 @@ class Base64Exception : Exception
 
         foreach (u, e; tests)
         {
-            assert(equal(Base64.encoder(cast(ubyte[])u), e[0]));
-            assert(equal(Base64.decoder(Base64.encoder(cast(ubyte[])u)), u));
+            assert(equal(Base64.encoder(cast(ubyte[]) u), e[0]));
+            assert(equal(Base64.decoder(Base64.encoder(cast(ubyte[]) u)), u));
 
-            assert(equal(Base64URL.encoder(cast(ubyte[])u), e[1]));
-            assert(equal(Base64URL.decoder(Base64URL.encoder(cast(ubyte[])u)), u));
+            assert(equal(Base64URL.encoder(cast(ubyte[]) u), e[1]));
+            assert(equal(Base64URL.decoder(Base64URL.encoder(cast(ubyte[]) u)), u));
 
-            assert(equal(Base64NoPadding.encoder(cast(ubyte[])u), e[2]));
-            assert(equal(Base64NoPadding.decoder(Base64NoPadding.encoder(cast(ubyte[])u)), u));
+            assert(equal(Base64NoPadding.encoder(cast(ubyte[]) u), e[2]));
+            assert(equal(Base64NoPadding.decoder(Base64NoPadding.encoder(cast(ubyte[]) u)), u));
 
-            assert(equal(Base64Re.encoder(cast(ubyte[])u), e[3]));
-            assert(equal(Base64Re.decoder(Base64Re.encoder(cast(ubyte[])u)), u));
+            assert(equal(Base64Re.encoder(cast(ubyte[]) u), e[3]));
+            assert(equal(Base64Re.decoder(Base64Re.encoder(cast(ubyte[]) u)), u));
         }
     }
 }

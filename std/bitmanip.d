@@ -3,6 +3,37 @@
 /**
 Bit-level manipulation facilities.
 
+$(SCRIPT inhibitQuickIndex = 1;)
+$(BOOKTABLE,
+$(TR $(TH Category) $(TH Functions))
+$(TR $(TD Bit constructs) $(TD
+    $(LREF BitArray)
+    $(LREF bitfields)
+    $(LREF bitsSet)
+))
+$(TR $(TD Endianness conversion) $(TD
+    $(LREF bigEndianToNative)
+    $(LREF littleEndianToNative)
+    $(LREF nativeToBigEndian)
+    $(LREF nativeToLittleEndian)
+    $(LREF swapEndian)
+))
+$(TR $(TD Integral ranges) $(TD
+    $(LREF append)
+    $(LREF peek)
+    $(LREF read)
+    $(LREF write)
+))
+$(TR $(TD Floating-Point manipulation) $(TD
+    $(LREF DoubleRep)
+    $(LREF FloatRep)
+))
+$(TR $(TD Tagging) $(TD
+    $(LREF taggedClassRef)
+    $(LREF taggedPointer)
+))
+)
+
 Copyright: Copyright Digital Mars 2007 - 2011.
 License:   $(HTTP www.boost.org/LICENSE_1_0.txt, Boost License 1.0).
 Authors:   $(HTTP digitalmars.com, Walter Bright),
@@ -38,7 +69,7 @@ private string myToString(ulong n)
     import core.internal.string : UnsignedStringBuf, unsignedToTempString;
     UnsignedStringBuf buf;
     auto s = unsignedToTempString(n, buf);
-    return cast(string)s ~ (n > uint.max ? "UL" : "U");
+    return cast(string) s ~ (n > uint.max ? "UL" : "U");
 }
 
 private template createAccessors(
@@ -84,7 +115,7 @@ private template createAccessors(
             // setter
                 ~"@property void " ~ name ~ "(bool v) @safe pure nothrow @nogc { "
                 ~"if (v) "~store~" |= "~myToString(maskAllElse)~";"
-                ~"else "~store~" &= ~cast(typeof("~store~"))"~myToString(maskAllElse)~";}\n";
+                ~"else "~store~" &= cast(typeof("~store~"))(-1-cast(typeof("~store~"))"~myToString(maskAllElse)~");}\n";
         }
         else
         {
@@ -103,7 +134,7 @@ private template createAccessors(
                 ~"assert(v >= "~name~`_min, "Value is smaller than the minimum value of bitfield '`~name~`'"); `
                 ~"assert(v <= "~name~`_max, "Value is greater than the maximum value of bitfield '`~name~`'"); `
                 ~store~" = cast(typeof("~store~"))"
-                ~" (("~store~" & ~cast(typeof("~store~"))"~myToString(maskAllElse)~")"
+                ~" (("~store~" & (-1-cast(typeof("~store~"))"~myToString(maskAllElse)~"))"
                 ~" | ((cast(typeof("~store~")) v << "~myToString(offset)~")"
                 ~" & "~myToString(maskAllElse)~"));}\n"
             // constants
@@ -601,9 +632,9 @@ unittest
 // Issue 12477
 @system unittest
 {
+    import core.exception : AssertError;
     import std.algorithm.searching : canFind;
     import std.bitmanip : bitfields;
-    import core.exception : AssertError;
 
     static struct S
     {
@@ -741,8 +772,8 @@ struct BitArray
 {
 private:
 
+    import core.bitop : btc, bts, btr, bsf, bt;
     import std.format : FormatSpec;
-    import core.bitop : bts, btr, bsf, bt;
 
     size_t _len;
     size_t* _ptr;
@@ -818,7 +849,7 @@ public:
     {
         assert(i < _len);
     }
-    body
+    do
     {
         return cast(bool) bt(_ptr, i);
     }
@@ -846,13 +877,198 @@ public:
     {
         assert(i < _len);
     }
-    body
+    do
     {
         if (b)
             bts(_ptr, i);
         else
             btr(_ptr, i);
         return b;
+    }
+
+    /**
+      Sets all the values in the $(D BitArray) to the
+      value specified by $(D val).
+     */
+    void opSliceAssign(bool val)
+    {
+        _ptr[0 .. fullWords] = val ? ~size_t(0) : 0;
+        if (endBits)
+        {
+            if (val)
+                _ptr[fullWords] |= endMask;
+            else
+                _ptr[fullWords] &= ~endMask;
+        }
+    }
+
+    ///
+    @system unittest
+    {
+        import std.algorithm.comparison : equal;
+
+        auto b = BitArray([1, 0, 1, 0, 1, 1]);
+
+        b[] = true;
+        // all bits are set
+        assert(b.bitsSet.equal([0, 1, 2, 3, 4, 5]));
+
+        b[] = false;
+        // none of the bits are set
+        assert(b.bitsSet.empty);
+    }
+
+    /**
+      Sets the bits of a slice of $(D BitArray) starting
+      at index `start` and ends at index ($D end - 1)
+      with the values specified by $(D val).
+     */
+    void opSliceAssign(bool val, size_t start, size_t end)
+    in
+    {
+        assert(start <= end);
+        assert(end <= length);
+    }
+    do
+    {
+        size_t startBlock = start / bitsPerSizeT;
+        size_t endBlock = end / bitsPerSizeT;
+        size_t startOffset = start % bitsPerSizeT;
+        size_t endOffset = end % bitsPerSizeT;
+
+        if (startBlock == endBlock)
+        {
+            size_t startBlockMask = ~((size_t(1) << startOffset) - 1);
+            size_t endBlockMask = (size_t(1) << endOffset) - 1;
+            size_t joinMask = startBlockMask & endBlockMask;
+            if (val)
+                _ptr[startBlock] |= joinMask;
+            else
+                _ptr[startBlock] &= ~joinMask;
+            return;
+        }
+
+        if (startOffset != 0)
+        {
+            size_t startBlockMask = ~((size_t(1) << startOffset) - 1);
+            if (val)
+                _ptr[startBlock] |= startBlockMask;
+            else
+                _ptr[startBlock] &= ~startBlockMask;
+            ++startBlock;
+        }
+        if (endOffset != 0)
+        {
+            size_t endBlockMask = (size_t(1) << endOffset) - 1;
+            if (val)
+                _ptr[endBlock] |= endBlockMask;
+            else
+                _ptr[endBlock] &= ~endBlockMask;
+        }
+        _ptr[startBlock .. endBlock] = size_t(0) - size_t(val);
+    }
+
+    ///
+    @system unittest
+    {
+        import std.algorithm.comparison : equal;
+        import std.range : iota;
+        import std.stdio;
+
+        auto b = BitArray([1, 0, 0, 0, 1, 1, 0]);
+        b[1 .. 3] = true;
+        assert(b.bitsSet.equal([0, 1, 2, 4, 5]));
+
+        bool[72] bitArray;
+        auto b1 = BitArray(bitArray);
+        b1[63 .. 67] = true;
+        assert(b1.bitsSet.equal([63, 64, 65, 66]));
+        b1[63 .. 67] = false;
+        assert(b1.bitsSet.empty);
+        b1[0 .. 64] = true;
+        assert(b1.bitsSet.equal(iota(0, 64)));
+        b1[0 .. 64] = false;
+        assert(b1.bitsSet.empty);
+
+        bool[256] bitArray2;
+        auto b2 = BitArray(bitArray2);
+        b2[3 .. 245] = true;
+        assert(b2.bitsSet.equal(iota(3, 245)));
+        b2[3 .. 245] = false;
+        assert(b2.bitsSet.empty);
+    }
+
+    /**
+      Flips all the bits in the $(D BitArray)
+     */
+    void flip()
+    {
+        foreach (i; 0 .. fullWords)
+            _ptr[i] = ~_ptr[i];
+
+        _ptr[fullWords] = (~_ptr[fullWords]) & endMask;
+    }
+
+    ///
+    @system unittest
+    {
+        import std.algorithm.comparison : equal;
+        import std.range : iota;
+
+        // positions 0, 2, 4 are set
+        auto b = BitArray([1, 0, 1, 0, 1, 0]);
+        b.flip();
+        // after flipping, positions 1, 3, 5 are set
+        assert(b.bitsSet.equal([1, 3, 5]));
+
+        bool[270] bits;
+        auto b1 = BitArray(bits);
+        b1.flip();
+        assert(b1.bitsSet.equal(iota(0, 270)));
+    }
+
+    /**
+      Flips a single bit, specified by `pos`
+     */
+    void flip(size_t i)
+    {
+        bt(_ptr, i) ? btr(_ptr, i) : bts(_ptr, i);
+    }
+
+    @system unittest
+    {
+        auto ax = BitArray([1, 0, 0, 1]);
+        ax.flip(0);
+        assert(ax[0] == 0);
+
+        bool[200] y;
+        y[90 .. 130] = true;
+        auto ay = BitArray(y);
+        ay.flip(100);
+        assert(ay[100] == 0);
+    }
+
+    /**********************************************
+     * Counts all the set bits in the $(D BitArray)
+     */
+    size_t count()
+    {
+        size_t bitCount;
+        foreach (i; 0 .. fullWords)
+            bitCount += countBitsSet(_ptr[i]);
+        bitCount += countBitsSet(_ptr[fullWords] & endMask);
+        return bitCount;
+    }
+
+    @system unittest
+    {
+        auto a = BitArray([0, 1, 1, 0, 0, 1, 1]);
+        assert(a.count == 4);
+
+        bool[200] boolArray;
+        boolArray[45 .. 130] = true;
+        auto c = BitArray(boolArray);
+        assert(c.count == 85);
     }
 
     /**********************************************
@@ -992,7 +1208,7 @@ public:
     {
         assert(result == this);
     }
-    body
+    do
     {
         if (_len >= 2)
         {
@@ -1036,7 +1252,7 @@ public:
     {
         assert(result == this);
     }
-    body
+    do
     {
         if (_len >= 2)
         {
@@ -1099,7 +1315,7 @@ public:
         auto p1 = this._ptr;
         auto p2 = a2._ptr;
 
-        if (p1[0..fullWords] != p2[0..fullWords])
+        if (p1[0 .. fullWords] != p2[0 .. fullWords])
             return false;
 
         if (!endBits)
@@ -1247,7 +1463,7 @@ public:
         foreach (i; 0 .. fullBytes)
         {
             hash *= 3559;
-            hash += (cast(byte*)this._ptr)[i];
+            hash += (cast(byte*) this._ptr)[i];
         }
         foreach (i; 8*fullBytes .. _len)
         {
@@ -1255,20 +1471,6 @@ public:
             hash += this[i];
         }
         return hash;
-    }
-
-    // Explicitly undocumented. It will be removed in January 2017. @@@DEPRECATED_2017-01@@@
-    deprecated("Use the constructor instead.")
-    void init(bool[] ba) pure nothrow
-    {
-        this = BitArray(ba);
-    }
-
-    // Explicitly undocumented. It will be removed in January 2017. @@@DEPRECATED_2017-01@@@
-    deprecated("Use the constructor instead.")
-    void init(void[] v, size_t numbits) pure nothrow
-    {
-        this = BitArray(v, numbits);
     }
 
     /***************************************
@@ -1304,9 +1506,9 @@ public:
         assert(numbits <= v.length * 8);
         assert(v.length % size_t.sizeof == 0);
     }
-    body
+    do
     {
-        _ptr = cast(size_t*)v.ptr;
+        _ptr = cast(size_t*) v.ptr;
         _len = numbits;
         if (endBits)
         {
@@ -1324,7 +1526,7 @@ public:
         auto a = BitArray(ba);
         void[] v;
 
-        v = cast(void[])a;
+        v = cast(void[]) a;
         auto b = BitArray(v, a.length);
 
         assert(b[0] == 1);
@@ -1362,7 +1564,7 @@ public:
         static bool[] ba = [1,0,1,0,1];
 
         auto a = BitArray(ba);
-        void[] v = cast(void[])a;
+        void[] v = cast(void[]) a;
 
         assert(v.length == a.dim * size_t.sizeof);
     }
@@ -1377,7 +1579,7 @@ public:
         BitArray result;
         result.length = _len;
 
-        result._ptr[0..dim] = ~this._ptr[0..dim];
+        result._ptr[0 .. dim] = ~this._ptr[0 .. dim];
 
         // Avoid putting garbage in extra bits
         // Remove once we zero on length extension
@@ -1413,7 +1615,7 @@ public:
     {
         assert(_len == e2.length);
     }
-    body
+    do
     {
         auto dim = this.dim;
 
@@ -1421,9 +1623,9 @@ public:
         result.length = _len;
 
         static if (op == "-")
-            result._ptr[0..dim] = this._ptr[0..dim] & ~e2._ptr[0..dim];
+            result._ptr[0 .. dim] = this._ptr[0 .. dim] & ~e2._ptr[0 .. dim];
         else
-            mixin("result._ptr[0..dim] = this._ptr[0..dim]"~op~" e2._ptr[0..dim];");
+            mixin("result._ptr[0 .. dim] = this._ptr[0 .. dim]"~op~" e2._ptr[0 .. dim];");
 
         // Avoid putting garbage in extra bits
         // Remove once we zero on length extension
@@ -1519,7 +1721,7 @@ public:
     {
         assert(_len == e2.length);
     }
-    body
+    do
     {
         foreach (i; 0 .. fullWords)
         {
@@ -1775,8 +1977,10 @@ public:
     {
         assert(nbits < bitsPerSizeT);
     }
-    body
+    do
     {
+        if (nbits == 0)
+            return lower;
         return (upper << (bitsPerSizeT - nbits)) | (lower >> nbits);
     }
 
@@ -1810,8 +2014,10 @@ public:
     {
         assert(nbits < bitsPerSizeT);
     }
-    body
+    do
     {
+        if (nbits == 0)
+            return upper;
         return (upper << nbits) | (lower >> (bitsPerSizeT - nbits));
     }
 
@@ -1899,8 +2105,11 @@ public:
         // end of the array.
         if (wordsToShift < dim)
         {
-            _ptr[dim - wordsToShift - 1] = rollRight(0, _ptr[dim - 1] & endMask,
-                                                    bitsToShift);
+            if (bitsToShift == 0)
+                _ptr[dim - wordsToShift - 1] = _ptr[dim - 1];
+            else
+                _ptr[dim - wordsToShift - 1] = rollRight(0, _ptr[dim - 1] & endMask,
+                                                        bitsToShift);
         }
 
         import std.algorithm.comparison : min;
@@ -1908,6 +2117,27 @@ public:
         {
             _ptr[dim - i - 1] = 0;
         }
+    }
+
+    // Issue 17467
+    @system unittest
+    {
+        import std.algorithm.comparison : equal;
+        import std.range : iota;
+
+        bool[] buf = new bool[64*3];
+        buf[0 .. 64] = true;
+        BitArray b = BitArray(buf);
+        assert(equal(b.bitsSet, iota(0, 64)));
+        b <<= 64;
+        assert(equal(b.bitsSet, iota(64, 128)));
+
+        buf = new bool[64*3];
+        buf[64*2 .. 64*3] = true;
+        b = BitArray(buf);
+        assert(equal(b.bitsSet, iota(64*2, 64*3)));
+        b >>= 64;
+        assert(equal(b.bitsSet, iota(64, 128)));
     }
 
     @system unittest
@@ -2160,18 +2390,18 @@ public:
     Swaps the endianness of the given integral value or character.
   +/
 T swapEndian(T)(T val) @safe pure nothrow @nogc
-    if (isIntegral!T || isSomeChar!T || isBoolean!T)
+if (isIntegral!T || isSomeChar!T || isBoolean!T)
 {
     static if (val.sizeof == 1)
         return val;
     else static if (isUnsigned!T)
         return swapEndianImpl(val);
     else static if (isIntegral!T)
-        return cast(T)swapEndianImpl(cast(Unsigned!T) val);
+        return cast(T) swapEndianImpl(cast(Unsigned!T) val);
     else static if (is(Unqual!T == wchar))
-        return cast(T)swapEndian(cast(ushort)val);
+        return cast(T) swapEndian(cast(ushort) val);
     else static if (is(Unqual!T == dchar))
-        return cast(T)swapEndian(cast(uint)val);
+        return cast(T) swapEndian(cast(uint) val);
     else
         static assert(0, T.stringof ~ " unsupported by swapEndian.");
 }
@@ -2191,7 +2421,7 @@ private uint swapEndianImpl(uint val) @trusted pure nothrow @nogc
 private ulong swapEndianImpl(ulong val) @trusted pure nothrow @nogc
 {
     import core.bitop : bswap;
-    immutable ulong res = bswap(cast(uint)val);
+    immutable ulong res = bswap(cast(uint) val);
     return res << 32 | bswap(cast(uint)(val >> 32));
 }
 
@@ -2223,7 +2453,7 @@ private ulong swapEndianImpl(ulong val) @trusted pure nothrow @nogc
         }
 
         static if (isSigned!T)
-            assert(swapEndian(swapEndian(cast(T)0)) == 0);
+            assert(swapEndian(swapEndian(cast(T) 0)) == 0);
 
         // used to trigger BUG6354
         static if (T.sizeof > 1 && isUnsigned!T)
@@ -2245,7 +2475,7 @@ private ulong swapEndianImpl(ulong val) @trusted pure nothrow @nogc
 
 
 private union EndianSwapper(T)
-    if (canSwapEndianness!T)
+if (canSwapEndianness!T)
 {
     Unqual!T value;
     ubyte[T.sizeof] array;
@@ -2272,7 +2502,7 @@ private union EndianSwapper(T)
     unusable if you tried to transfer it to another machine).
   +/
 auto nativeToBigEndian(T)(T val) @safe pure nothrow @nogc
-    if (canSwapEndianness!T)
+if (canSwapEndianness!T)
 {
     return nativeToBigEndianImpl(val);
 }
@@ -2290,7 +2520,7 @@ auto nativeToBigEndian(T)(T val) @safe pure nothrow @nogc
 }
 
 private auto nativeToBigEndianImpl(T)(T val) @safe pure nothrow @nogc
-    if (isIntegral!T || isSomeChar!T || isBoolean!T)
+if (isIntegral!T || isSomeChar!T || isBoolean!T)
 {
     EndianSwapper!T es = void;
 
@@ -2303,7 +2533,7 @@ private auto nativeToBigEndianImpl(T)(T val) @safe pure nothrow @nogc
 }
 
 private auto nativeToBigEndianImpl(T)(T val) @safe pure nothrow @nogc
-    if (isFloatOrDouble!T)
+if (isFloatOrDouble!T)
 {
     version(LittleEndian)
         return floatEndianImpl!(T, true)(val);
@@ -2340,7 +2570,7 @@ private auto nativeToBigEndianImpl(T)(T val) @safe pure nothrow @nogc
         assert(bigEndianToNative!T(nativeToBigEndian(T.max)) == T.max);
 
         static if (isSigned!T)
-            assert(bigEndianToNative!T(nativeToBigEndian(cast(T)0)) == 0);
+            assert(bigEndianToNative!T(nativeToBigEndian(cast(T) 0)) == 0);
 
         static if (!is(T == bool))
         {
@@ -2394,7 +2624,7 @@ private auto nativeToBigEndianImpl(T)(T val) @safe pure nothrow @nogc
     can't actually have swapped floating point values as floating point values).
   +/
 T bigEndianToNative(T, size_t n)(ubyte[n] val) @safe pure nothrow @nogc
-    if (canSwapEndianness!T && n == T.sizeof)
+if (canSwapEndianness!T && n == T.sizeof)
 {
     return bigEndianToNativeImpl!(T, n)(val);
 }
@@ -2412,8 +2642,8 @@ T bigEndianToNative(T, size_t n)(ubyte[n] val) @safe pure nothrow @nogc
 }
 
 private T bigEndianToNativeImpl(T, size_t n)(ubyte[n] val) @safe pure nothrow @nogc
-    if ((isIntegral!T || isSomeChar!T || isBoolean!T) &&
-       n == T.sizeof)
+if ((isIntegral!T || isSomeChar!T || isBoolean!T) &&
+    n == T.sizeof)
 {
     EndianSwapper!T es = void;
     es.array = val;
@@ -2427,7 +2657,7 @@ private T bigEndianToNativeImpl(T, size_t n)(ubyte[n] val) @safe pure nothrow @n
 }
 
 private T bigEndianToNativeImpl(T, size_t n)(ubyte[n] val) @safe pure nothrow @nogc
-    if (isFloatOrDouble!T && n == T.sizeof)
+if (isFloatOrDouble!T && n == T.sizeof)
 {
     version(LittleEndian)
         return cast(T) floatEndianImpl!(n, true)(val);
@@ -2446,7 +2676,7 @@ private T bigEndianToNativeImpl(T, size_t n)(ubyte[n] val) @safe pure nothrow @n
     can't actually have swapped floating point values as floating point values).
   +/
 auto nativeToLittleEndian(T)(T val) @safe pure nothrow @nogc
-    if (canSwapEndianness!T)
+if (canSwapEndianness!T)
 {
     return nativeToLittleEndianImpl(val);
 }
@@ -2464,7 +2694,7 @@ auto nativeToLittleEndian(T)(T val) @safe pure nothrow @nogc
 }
 
 private auto nativeToLittleEndianImpl(T)(T val) @safe pure nothrow @nogc
-    if (isIntegral!T || isSomeChar!T || isBoolean!T)
+if (isIntegral!T || isSomeChar!T || isBoolean!T)
 {
     EndianSwapper!T es = void;
 
@@ -2477,7 +2707,7 @@ private auto nativeToLittleEndianImpl(T)(T val) @safe pure nothrow @nogc
 }
 
 private auto nativeToLittleEndianImpl(T)(T val) @safe pure nothrow @nogc
-    if (isFloatOrDouble!T)
+if (isFloatOrDouble!T)
 {
     version(BigEndian)
         return floatEndianImpl!(T, true)(val);
@@ -2505,7 +2735,7 @@ private auto nativeToLittleEndianImpl(T)(T val) @safe pure nothrow @nogc
         assert(littleEndianToNative!T(nativeToLittleEndian(T.max)) == T.max);
 
         static if (isSigned!T)
-            assert(littleEndianToNative!T(nativeToLittleEndian(cast(T)0)) == 0);
+            assert(littleEndianToNative!T(nativeToLittleEndian(cast(T) 0)) == 0);
 
         static if (!is(T == bool))
         {
@@ -2541,7 +2771,7 @@ private auto nativeToLittleEndianImpl(T)(T val) @safe pure nothrow @nogc
     unusable if you tried to transfer it to another machine).
   +/
 T littleEndianToNative(T, size_t n)(ubyte[n] val) @safe pure nothrow @nogc
-    if (canSwapEndianness!T && n == T.sizeof)
+if (canSwapEndianness!T && n == T.sizeof)
 {
     return littleEndianToNativeImpl!T(val);
 }
@@ -2559,8 +2789,8 @@ T littleEndianToNative(T, size_t n)(ubyte[n] val) @safe pure nothrow @nogc
 }
 
 private T littleEndianToNativeImpl(T, size_t n)(ubyte[n] val) @safe pure nothrow @nogc
-    if ((isIntegral!T || isSomeChar!T || isBoolean!T) &&
-       n == T.sizeof)
+if ((isIntegral!T || isSomeChar!T || isBoolean!T) &&
+    n == T.sizeof)
 {
     EndianSwapper!T es = void;
     es.array = val;
@@ -2574,8 +2804,8 @@ private T littleEndianToNativeImpl(T, size_t n)(ubyte[n] val) @safe pure nothrow
 }
 
 private T littleEndianToNativeImpl(T, size_t n)(ubyte[n] val) @safe pure nothrow @nogc
-    if (((isFloatOrDouble!T) &&
-       n == T.sizeof))
+if (((isFloatOrDouble!T) &&
+    n == T.sizeof))
 {
     version(BigEndian)
         return floatEndianImpl!(n, true)(val);
@@ -2584,7 +2814,7 @@ private T littleEndianToNativeImpl(T, size_t n)(ubyte[n] val) @safe pure nothrow
 }
 
 private auto floatEndianImpl(T, bool swap)(T val) @safe pure nothrow @nogc
-    if (isFloatOrDouble!T)
+if (isFloatOrDouble!T)
 {
     EndianSwapper!T es = void;
     es.value = val;
@@ -2596,7 +2826,7 @@ private auto floatEndianImpl(T, bool swap)(T val) @safe pure nothrow @nogc
 }
 
 private auto floatEndianImpl(size_t n, bool swap)(ubyte[n] val) @safe pure nothrow @nogc
-    if (n == 4 || n == 8)
+if (n == 4 || n == 8)
 {
     static if (n == 4)       EndianSwapper!float es = void;
     else static if (n == 8)  EndianSwapper!double es = void;
@@ -2686,9 +2916,9 @@ private template canSwapEndianness(T)
   +/
 
 T peek(T, Endian endianness = Endian.bigEndian, R)(R range)
-    if (canSwapEndianness!T &&
-        isForwardRange!R &&
-        is(ElementType!R : const ubyte))
+if (canSwapEndianness!T &&
+    isForwardRange!R &&
+    is(ElementType!R : const ubyte))
 {
     static if (hasSlicing!R)
         const ubyte[T.sizeof] bytes = range[0 .. T.sizeof];
@@ -2713,20 +2943,20 @@ T peek(T, Endian endianness = Endian.bigEndian, R)(R range)
 
 /++ Ditto +/
 T peek(T, Endian endianness = Endian.bigEndian, R)(R range, size_t index)
-    if (canSwapEndianness!T &&
-       isForwardRange!R &&
-       hasSlicing!R &&
-       is(ElementType!R : const ubyte))
+if (canSwapEndianness!T &&
+    isForwardRange!R &&
+    hasSlicing!R &&
+    is(ElementType!R : const ubyte))
 {
     return peek!(T, endianness)(range, &index);
 }
 
 /++ Ditto +/
 T peek(T, Endian endianness = Endian.bigEndian, R)(R range, size_t* index)
-    if (canSwapEndianness!T &&
-       isForwardRange!R &&
-       hasSlicing!R &&
-       is(ElementType!R : const ubyte))
+if (canSwapEndianness!T &&
+    isForwardRange!R &&
+    hasSlicing!R &&
+    is(ElementType!R : const ubyte))
 {
     assert(index);
 
@@ -2988,9 +3218,9 @@ T peek(T, Endian endianness = Endian.bigEndian, R)(R range, size_t* index)
         range = The range to read from.
   +/
 T read(T, Endian endianness = Endian.bigEndian, R)(ref R range)
-    if (canSwapEndianness!T && isInputRange!R && is(ElementType!R : const ubyte))
+if (canSwapEndianness!T && isInputRange!R && is(ElementType!R : const ubyte))
 {
-    static if (hasSlicing!R)
+    static if (hasSlicing!R && is(typeof(R.init[0 .. 0]) : const(ubyte)[]))
     {
         const ubyte[T.sizeof] bytes = range[0 .. T.sizeof];
         range.popFrontN(T.sizeof);
@@ -3219,6 +3449,32 @@ T read(T, Endian endianness = Endian.bigEndian, R)(ref R range)
     assert(range.empty);
 }
 
+// issue 17247
+@safe unittest
+{
+    struct UbyteRange
+    {
+        ubyte[] impl;
+        @property bool empty() { return impl.empty; }
+        @property ubyte front() { return impl.front; }
+        void popFront() { impl.popFront(); }
+        @property UbyteRange save() { return this; }
+
+        // N.B. support slicing but do not return ubyte[] slices.
+        UbyteRange opSlice(size_t start, size_t end)
+        {
+            return UbyteRange(impl[start .. end]);
+        }
+        @property size_t length() { return impl.length; }
+        size_t opDollar() { return impl.length; }
+    }
+    static assert(hasSlicing!UbyteRange);
+
+    auto r = UbyteRange([0x01, 0x00, 0x00, 0x00]);
+    int x = r.read!(int, Endian.littleEndian)();
+    assert(x == 1);
+}
+
 
 /++
     Takes an integral value, converts it to the given endianness, and writes it
@@ -3234,20 +3490,20 @@ T read(T, Endian endianness = Endian.bigEndian, R)(ref R range)
                 is updated to the index after the bytes read.
   +/
 void write(T, Endian endianness = Endian.bigEndian, R)(R range, T value, size_t index)
-    if (canSwapEndianness!T &&
-       isForwardRange!R &&
-       hasSlicing!R &&
-       is(ElementType!R : ubyte))
+if (canSwapEndianness!T &&
+    isForwardRange!R &&
+    hasSlicing!R &&
+    is(ElementType!R : ubyte))
 {
     write!(T, endianness)(range, value, &index);
 }
 
 /++ Ditto +/
 void write(T, Endian endianness = Endian.bigEndian, R)(R range, T value, size_t* index)
-    if (canSwapEndianness!T &&
-       isForwardRange!R &&
-       hasSlicing!R &&
-       is(ElementType!R : ubyte))
+if (canSwapEndianness!T &&
+    isForwardRange!R &&
+    hasSlicing!R &&
+    is(ElementType!R : ubyte))
 {
     assert(index);
 
@@ -3578,7 +3834,7 @@ void write(T, Endian endianness = Endian.bigEndian, R)(R range, T value, size_t*
         value = The value to _append.
   +/
 void append(T, Endian endianness = Endian.bigEndian, R)(R range, T value)
-    if (canSwapEndianness!T && isOutputRange!(R, ubyte))
+if (canSwapEndianness!T && isOutputRange!(R, ubyte))
 {
     static if (endianness == Endian.bigEndian)
         immutable bytes = nativeToBigEndian!T(value);
@@ -3736,8 +3992,8 @@ void append(T, Endian endianness = Endian.bigEndian, R)(R range, T value)
 
 @system unittest
 {
-    import std.format : format;
     import std.array;
+    import std.format : format;
     import std.meta;
     foreach (endianness; AliasSeq!(Endian.bigEndian, Endian.littleEndian))
     {
@@ -3750,7 +4006,7 @@ void append(T, Endian endianness = Endian.bigEndian, R)(R range, T value)
         size_t length = 0;
         foreach (T; Types)
         {
-            toWrite.append!(T, endianness)(cast(T)values[index++]);
+            toWrite.append!(T, endianness)(cast(T) values[index++]);
             length += T.sizeof;
         }
 
@@ -3779,7 +4035,7 @@ Counts the number of set bits in the binary representation of $(D value).
 For signed integers, the sign bit is included in the count.
 */
 private uint countBitsSet(T)(T value) @nogc pure nothrow
-    if (isIntegral!T)
+if (isIntegral!T)
 {
     // http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
     static if (T.sizeof == 8)
@@ -3816,7 +4072,7 @@ private uint countBitsSet(T)(T value) @nogc pure nothrow
     {
         static assert(false, "countBitsSet only supports 1, 2, 4, or 8 byte sized integers.");
     }
-    return cast(uint)c;
+    return cast(uint) c;
 }
 
 @safe unittest
@@ -3832,13 +4088,13 @@ private uint countBitsSet(T)(T value) @nogc pure nothrow
     import std.meta;
     foreach (T; AliasSeq!(byte, ubyte, short, ushort, int, uint, long, ulong))
     {
-        assert(countBitsSet(cast(T)0) == 0);
-        assert(countBitsSet(cast(T)1) == 1);
-        assert(countBitsSet(cast(T)2) == 1);
-        assert(countBitsSet(cast(T)3) == 2);
-        assert(countBitsSet(cast(T)4) == 1);
-        assert(countBitsSet(cast(T)5) == 2);
-        assert(countBitsSet(cast(T)127) == 7);
+        assert(countBitsSet(cast(T) 0) == 0);
+        assert(countBitsSet(cast(T) 1) == 1);
+        assert(countBitsSet(cast(T) 2) == 1);
+        assert(countBitsSet(cast(T) 3) == 2);
+        assert(countBitsSet(cast(T) 4) == 1);
+        assert(countBitsSet(cast(T) 5) == 2);
+        assert(countBitsSet(cast(T) 127) == 7);
         static if (isSigned!T)
         {
             assert(countBitsSet(cast(T)-1) == 8 * T.sizeof);
@@ -3850,7 +4106,7 @@ private uint countBitsSet(T)(T value) @nogc pure nothrow
         }
     }
     assert(countBitsSet(1_000_000) == 7);
-    foreach (i; 0..63)
+    foreach (i; 0 .. 63)
         assert(countBitsSet(1UL << i) == 1);
 }
 
@@ -3918,7 +4174,7 @@ Index 0 corresponds to the least significant bit.
 For signed integers, the highest index corresponds to the sign bit.
 */
 auto bitsSet(T)(T value) @nogc pure nothrow
-    if (isIntegral!T)
+if (isIntegral!T)
 {
     return BitsSet!T(value);
 }
@@ -3943,13 +4199,13 @@ auto bitsSet(T)(T value) @nogc pure nothrow
     import std.meta;
     foreach (T; AliasSeq!(byte, ubyte, short, ushort, int, uint, long, ulong))
     {
-        assert(bitsSet(cast(T)0).empty);
-        assert(bitsSet(cast(T)1).equal([0]));
-        assert(bitsSet(cast(T)2).equal([1]));
-        assert(bitsSet(cast(T)3).equal([0, 1]));
-        assert(bitsSet(cast(T)4).equal([2]));
-        assert(bitsSet(cast(T)5).equal([0, 2]));
-        assert(bitsSet(cast(T)127).equal(iota(7)));
+        assert(bitsSet(cast(T) 0).empty);
+        assert(bitsSet(cast(T) 1).equal([0]));
+        assert(bitsSet(cast(T) 2).equal([1]));
+        assert(bitsSet(cast(T) 3).equal([0, 1]));
+        assert(bitsSet(cast(T) 4).equal([2]));
+        assert(bitsSet(cast(T) 5).equal([0, 2]));
+        assert(bitsSet(cast(T) 127).equal(iota(7)));
         static if (isSigned!T)
         {
             assert(bitsSet(cast(T)-1).equal(iota(8 * T.sizeof)));
@@ -3961,6 +4217,6 @@ auto bitsSet(T)(T value) @nogc pure nothrow
         }
     }
     assert(bitsSet(1_000_000).equal([6, 9, 14, 16, 17, 18, 19]));
-    foreach (i; 0..63)
+    foreach (i; 0 .. 63)
         assert(bitsSet(1UL << i).equal([i]));
 }

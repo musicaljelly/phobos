@@ -27,10 +27,10 @@ module std.bigint;
 
 import std.conv : ConvException;
 
-private import std.internal.math.biguintcore;
-private import std.format : FormatSpec, FormatException;
-private import std.traits;
-private import std.range.primitives;
+import std.format : FormatSpec, FormatException;
+import std.internal.math.biguintcore;
+import std.range.primitives;
+import std.traits;
 
 /** A struct representing an arbitrary precision integer.
  *
@@ -59,18 +59,19 @@ public:
      *     s = a finite bidirectional range of any character type
      *
      * Throws:
-     *     $(D ConvException) if the string doesn't represent a valid number
+     *     $(REF ConvException, std,conv) if the string doesn't represent a valid number
      */
     this(Range)(Range s) if (
         isBidirectionalRange!Range &&
         isSomeChar!(ElementType!Range) &&
-        !isInfinite!Range)
+        !isInfinite!Range &&
+        !isSomeString!Range)
     {
         import std.algorithm.iteration : filterBidirectional;
         import std.algorithm.searching : startsWith;
-        import std.utf : byCodeUnit, byChar;
-        import std.exception : enforce;
         import std.conv : ConvException;
+        import std.exception : enforce;
+        import std.utf : byChar;
 
         enforce!ConvException(!s.empty, "Can't initialize BigInt with an empty range");
 
@@ -79,37 +80,31 @@ public:
 
         data = 0UL;
 
-        // auto decoding special case
-        static if (isNarrowString!Range)
-            auto codeUnits = s.byCodeUnit();
-        else
-            alias codeUnits = s;
-
         // check for signs and if the string is a hex value
-        if (codeUnits.front == '+')
+        if (s.front == '+')
         {
-            codeUnits.popFront(); // skip '+'
+            s.popFront(); // skip '+'
         }
-        else if (codeUnits.front == '-')
+        else if (s.front == '-')
         {
             neg = true;
-            codeUnits.popFront();
+            s.popFront();
         }
 
-        if (codeUnits.save.startsWith("0x".byChar) ||
-            codeUnits.save.startsWith("0X".byChar))
+        if (s.save.startsWith("0x".byChar) ||
+            s.save.startsWith("0X".byChar))
         {
-            codeUnits.popFront;
-            codeUnits.popFront;
+            s.popFront;
+            s.popFront;
 
-            if (!codeUnits.empty)
-                ok = data.fromHexString(codeUnits.filterBidirectional!(a => a != '_'));
+            if (!s.empty)
+                ok = data.fromHexString(s.filterBidirectional!(a => a != '_'));
             else
                 ok = false;
         }
         else
         {
-            ok = data.fromDecimalString(codeUnits.filterBidirectional!(a => a != '_'));
+            ok = data.fromDecimalString(s.filterBidirectional!(a => a != '_'));
         }
 
         enforce!ConvException(ok, "Not a valid numerical string");
@@ -120,11 +115,18 @@ public:
         sign = neg;
     }
 
+    /// ditto
+    this(Range)(Range s) pure if (isSomeString!Range)
+    {
+        import std.utf : byCodeUnit;
+        this(s.byCodeUnit);
+    }
+
     @system unittest
     {
         // system because of the dummy ranges eventually call std.array!string
-        import std.internal.test.dummyrange;
         import std.exception : assertThrown;
+        import std.internal.test.dummyrange;
 
         auto r1 = new ReferenceBidirectionalRange!dchar("101");
         auto big1 = BigInt(r1);
@@ -155,7 +157,7 @@ public:
         // @system due to failure in FreeBSD32
         ulong data = 1_000_000_000_000;
         auto bigData = BigInt(data);
-        assert(data == BigInt("1_000_000_000_000"));
+        assert(bigData == BigInt("1_000_000_000_000"));
     }
 
     /// Construct a BigInt from another BigInt.
@@ -175,7 +177,7 @@ public:
     /// Assignment from built-in integer types.
     BigInt opAssign(T)(T x) pure nothrow if (isIntegral!T)
     {
-        data = cast(ulong)absUnsign(x);
+        data = cast(ulong) absUnsign(x);
         sign = (x < 0);
         return this;
     }
@@ -238,10 +240,10 @@ public:
         }
         else static if (op=="/")
         {
-            assert(y!=0, "Division by zero");
+            assert(y != 0, "Division by zero");
             static if (T.sizeof <= uint.sizeof)
             {
-                data = BigUint.divInt(data, cast(uint)u);
+                data = BigUint.divInt(data, cast(uint) u);
             }
             else
             {
@@ -251,14 +253,14 @@ public:
         }
         else static if (op=="%")
         {
-            assert(y!=0, "Division by zero");
+            assert(y != 0, "Division by zero");
             static if (is(immutable(T) == immutable(long)) || is( immutable(T) == immutable(ulong) ))
             {
                 this %= BigInt(y);
             }
             else
             {
-                data = cast(ulong)BigUint.modInt(data, cast(uint)u);
+                data = cast(ulong) BigUint.modInt(data, cast(uint) u);
                 if (data.isZero())
                     sign = false;
             }
@@ -307,6 +309,55 @@ public:
 
         b /= 5;
         assert(b == BigInt("200_002_469"));
+    }
+
+    // Issue 16264
+    @system unittest
+    {
+        auto a = BigInt(
+    `335690982744637013564796917901053301979460129353374296317539383938630086938` ~
+    `465898213033510992292836631752875403891802201862860531801760096359705447768` ~
+    `957432600293361240407059207520920532482429912948952142341440301429494694368` ~
+    `264560802292927144211230021750155988283029753927847924288850436812178022006` ~
+    `408597793414273953252832688620479083497367463977081627995406363446761896298` ~
+    `967177607401918269561385622811274398143647535024987050366350585544531063531` ~
+    `7118554808325723941557169427279911052268935775`);
+
+        auto b = BigInt(
+    `207672245542926038535480439528441949928508406405023044025560363701392340829` ~
+    `852529131306106648201340460604257466180580583656068555417076345439694125326` ~
+    `843947164365500055567495554645796102453565953360564114634705366335703491527` ~
+    `429426780005741168078089657359833601261803592920462081364401456331489106355` ~
+    `199133982282631108670436696758342051198891939367812305559960349479160308314` ~
+    `068518200681530999860641597181672463704794566473241690395901768680673716414` ~
+    `243691584391572899147223065906633310537507956952626106509069491302359792769` ~
+    `378934570685117202046921464019396759638376362935855896435623442486036961070` ~
+    `534574698959398017332214518246531363445309522357827985468581166065335726996` ~
+    `711467464306784543112544076165391268106101754253962102479935962248302404638` ~
+    `21737237102628470475027851189594709504`);
+
+        BigInt c = a * b;  // Crashes
+
+        assert(c == BigInt(
+    `697137001950904057507249234183127244116872349433141878383548259425589716813` ~
+    `135440660252012378417669596912108637127036044977634382385990472429604619344` ~
+    `738746224291111527200379708978133071390303850450970292020176369525401803474` ~
+    `998613408923490273129022167907826017408385746675184651576154302536663744109` ~
+    `111018961065316024005076097634601030334948684412785487182572502394847587887` ~
+    `507385831062796361152176364659197432600147716058873232435238712648552844428` ~
+    `058885217631715287816333209463171932255049134340904981280717725999710525214` ~
+    `161541960645335744430049558161514565159449390036287489478108344584188898872` ~
+    `434914159748515512161981956372737022393466624249130107254611846175580584736` ~
+    `276213025837422102290580044755202968610542057651282410252208599309841499843` ~
+    `672251048622223867183370008181364966502137725166782667358559333222947265344` ~
+    `524195551978394625568228658697170315141077913403482061673401937141405425042` ~
+    `283546509102861986303306729882186190883772633960389974665467972016939172303` ~
+    `653623175801495207204880400522581834672918935651426160175413277309985678579` ~
+    `830872397214091472424064274864210953551447463312267310436493480881235642109` ~
+    `668498742629676513172286703948381906930297135997498416573231570483993847269` ~
+    `479552708416124555462530834668011570929850407031109157206202741051573633443` ~
+    `58105600`
+        ));
     }
 
     /**
@@ -424,7 +475,7 @@ public:
     auto opBinary(string op, T)(T y) pure nothrow const
         if (op == "%" && isIntegral!T)
     {
-        assert(y!=0);
+        assert(y != 0);
 
         // BigInt % long => long
         // BigInt % ulong => BigInt
@@ -596,7 +647,7 @@ public:
     {
         if (sign != (y<0))
             return 0;
-        return data.opEquals(cast(ulong)absUnsign(y));
+        return data.opEquals(cast(ulong) absUnsign(y));
     }
 
     ///
@@ -653,12 +704,12 @@ public:
             if (isUnsigned!T || !sign)
             {
                 if (l <= T.max)
-                    return cast(T)l;
+                    return cast(T) l;
             }
             else
             {
                 if (l <= ulong(T.max)+1)
-                    return cast(T)-long(l); // -long.min==long.min
+                    return cast(T)-long(l); // -long.min == long.min
             }
         }
 
@@ -755,13 +806,13 @@ public:
     {
         if (sign != (y<0) )
             return sign ? -1 : 1;
-        int cmp = data.opCmp(cast(ulong)absUnsign(y));
+        int cmp = data.opCmp(cast(ulong) absUnsign(y));
         return sign? -cmp: cmp;
     }
     /// ditto
     int opCmp(T:BigInt)(const T y) pure nothrow @nogc const
     {
-        if (sign!=y.sign)
+        if (sign != y.sign)
             return sign ? -1 : 1;
         immutable cmp = data.opCmp(y.data);
         return sign? -cmp: cmp;
@@ -914,7 +965,7 @@ public:
                 sink(" ");
 
         if (signChar)
-            sink((&signChar)[0..1]);
+            sink((&signChar)[0 .. 1]);
 
         if (!f.flDash && f.flZero)
             foreach (i; 0 .. difw)
@@ -1018,7 +1069,9 @@ private:
     assert(h == a);
     assert(i == e);
     BigInt j = "-0x9A56_57f4_7B83_AB78";
+    BigInt k = j;
     j ^^= 11;
+    assert(k ^^ 11 == j);
 }
 
 /**
@@ -1029,16 +1082,16 @@ Returns:
     A $(D string) that represents the $(D BigInt) as a decimal number.
 
 */
-string toDecimalString(const(BigInt) x)
+string toDecimalString(const(BigInt) x) pure nothrow
 {
-    string outbuff="";
-    void sink(const(char)[] s) { outbuff ~= s; }
-    x.toString(&sink, "%d");
-    return outbuff;
+    auto buff = x.data.toDecimalString(x.isNegative ? 1 : 0);
+    if (x.isNegative)
+        buff[0] = '-';
+    return buff;
 }
 
 ///
-@system unittest
+@system pure unittest
 {
     auto x = BigInt("123");
     x *= 1000;
@@ -1086,7 +1139,8 @@ Returns:
     The absolute value of x.
 
 */
-Unsigned!T absUnsign(T)(T x) if (isIntegral!T)
+Unsigned!T absUnsign(T)(T x)
+if (isIntegral!T)
 {
     static if (isSigned!T)
     {
@@ -1095,12 +1149,20 @@ Unsigned!T absUnsign(T)(T x) if (isIntegral!T)
          * on two's complement machines because unsigned(T.min) = |T.min|
          * even though -T.min = T.min.
          */
-        return unsigned((x < 0) ? -x : x);
+        return unsigned((x < 0) ? cast(T)(0-x) : x);
     }
     else
     {
         return x;
     }
+}
+
+///
+nothrow pure @system
+unittest
+{
+    assert((-1).absUnsign == 1);
+    assert(1.absUnsign == 1);
 }
 
 nothrow pure @system
@@ -1110,6 +1172,7 @@ unittest
     a = 1;
     b = 2;
     auto c = a + b;
+    assert(c == 3);
 }
 
 nothrow pure @system
@@ -1118,7 +1181,9 @@ unittest
     long a;
     BigInt b;
     auto c = a + b;
+    assert(c == 0);
     auto d = b + a;
+    assert(d == 0);
 }
 
 nothrow pure @system
@@ -1489,11 +1554,11 @@ unittest
     const BigInt cbi = 3;
     immutable BigInt ibi = 3;
 
-    assert(__traits(compiles, foo(cbi)));
-    assert(__traits(compiles, foo(ibi)));
+    foo(cbi);
+    foo(ibi);
 
-    import std.meta : AliasSeq;
     import std.conv : to;
+    import std.meta : AliasSeq;
 
     foreach (T1; AliasSeq!(BigInt, const(BigInt), immutable(BigInt)))
     {
@@ -1503,7 +1568,7 @@ unittest
             T2 t2 = t1;
 
             T2 t2_1 = to!T2(t1);
-            T2 t2_2 = cast(T2)t1;
+            T2 t2_2 = cast(T2) t1;
 
             assert(t2 == t1);
             assert(t2 == 2);
@@ -1518,12 +1583,14 @@ unittest
 
     BigInt n = 2;
     n *= 2;
+    assert(n == 4);
 }
 
 @safe unittest // 8167
 {
     BigInt a = BigInt(3);
     BigInt b = BigInt(a);
+    assert(b == 3);
 }
 
 @safe unittest // 9061
@@ -1609,6 +1676,7 @@ unittest
     assert(is(typeof(x % 1UL) == BigInt));
 
     auto x1 = BigInt(8);
+    assert(x1 / x == x1);
     auto x2 = -BigInt(long.min) + 1;
 
     // long
@@ -1647,7 +1715,7 @@ unittest
     assert(x.isZero());
 
     x = BigInt(-3);
-    x %= cast(ushort)3;
+    x %= cast(ushort) 3;
     assert(!x.isNegative());
     assert(x.isZero());
 
@@ -1672,7 +1740,7 @@ unittest
 }
 
 // Issue 6447
-unittest
+@system unittest
 {
     import std.algorithm.comparison : equal;
     import std.range : iota;
@@ -1687,3 +1755,9 @@ unittest
     ]));
 }
 
+// Issue 17330
+@system unittest
+{
+    auto b = immutable BigInt("123");
+    assert(b == 123);
+}

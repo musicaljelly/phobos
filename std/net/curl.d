@@ -156,44 +156,30 @@ Distributed under the Boost Software License, Version 1.0.
 */
 module std.net.curl;
 
-import core.thread;
-import etc.c.curl;
-import std.algorithm;
-import std.array;
-import std.concurrency;
-import std.conv;
-import std.datetime;
-import std.encoding;
-import std.exception;
-import std.meta;
-import std.regex;
-import std.socket : InternetAddress;
-import std.string;
-import std.traits;
-import std.typecons;
-
-import std.internal.cstring;
-
 public import etc.c.curl : CurlOption;
+import core.time : dur;
+import etc.c.curl : CURLcode;
+import std.concurrency : Tid;
+import std.range.primitives;
+import std.encoding : EncodingScheme;
+import std.traits : isSomeChar;
+import std.typecons : Flag, Yes, No, Tuple;
 
 version(unittest)
 {
+    import std.socket : Socket;
+
     // Run unit test with the PHOBOS_TEST_ALLOW_NET=1 set in order to
     // allow net traffic
-    import std.stdio;
-    import std.range;
-    import std.process : environment;
-    import std.file : deleteme;
-    import std.path : buildPath;
-
-    import std.socket : Address, INADDR_LOOPBACK, Socket, TcpSocket;
-
     private struct TestServer
     {
+        import std.socket : Socket, TcpSocket;
+
         string addr() { return _addr; }
 
         void handle(void function(Socket s) dg)
         {
+            import std.concurrency : send;
             tid.send(dg);
         }
 
@@ -203,6 +189,9 @@ version(unittest)
 
         static void loop(shared TcpSocket listener)
         {
+            import std.concurrency : OwnerTerminated, receiveOnly;
+            import std.stdio : stderr;
+
             try while (true)
             {
                 void function(Socket) handler = void;
@@ -210,7 +199,7 @@ version(unittest)
                     handler = receiveOnly!(typeof(handler));
                 catch (OwnerTerminated)
                     return;
-                handler((cast()listener).accept);
+                handler((cast() listener).accept);
             }
             catch (Throwable e)
             {
@@ -223,16 +212,20 @@ version(unittest)
 
     private TestServer startServer()
     {
+        import std.concurrency : spawn;
+        import std.socket : INADDR_LOOPBACK, InternetAddress, TcpSocket;
+
         auto sock = new TcpSocket;
         sock.bind(new InternetAddress(INADDR_LOOPBACK, InternetAddress.PORT_ANY));
         sock.listen(1);
         auto addr = sock.localAddress.toString();
-        auto tid = spawn(&TestServer.loop, cast(shared)sock);
+        auto tid = spawn(&TestServer.loop, cast(shared) sock);
         return TestServer(addr, tid);
     }
 
     private ref TestServer testServer()
     {
+        import std.concurrency : initOnce;
         __gshared TestServer server;
         return initOnce!server(startServer());
     }
@@ -245,6 +238,11 @@ version(unittest)
 
     private Request!T recvReq(T=char)(Socket s)
     {
+        import std.algorithm.comparison : min;
+        import std.algorithm.searching : find, canFind;
+        import std.conv : to;
+        import std.regex : ctRegex, matchFirst;
+
         ubyte[1024] tmp=void;
         ubyte[] buf;
 
@@ -259,7 +257,7 @@ version(unittest)
             if (bdy.empty)
                 continue;
 
-            auto hdrs = cast(string)buf[0 .. $ - bdy.length];
+            auto hdrs = cast(string) buf[0 .. $ - bdy.length];
             bdy.popFrontN(4);
             // no support for chunked transfer-encoding
             if (auto m = hdrs.matchFirst(ctRegex!(`Content-Length: ([0-9]+)`, "i")))
@@ -288,6 +286,8 @@ version(unittest)
 
     private string httpOK(string msg)
     {
+        import std.conv : to;
+
         return "HTTP/1.1 200 OK\r\n"~
             "Content-Type: text/plain\r\n"~
             "Content-Length: "~msg.length.to!string~"\r\n"~
@@ -314,7 +314,7 @@ version(unittest)
 version(StdDdoc) import std.stdio;
 
 // Default data timeout for Protocols
-private enum _defaultDataTimeout = dur!"minutes"(2);
+enum _defaultDataTimeout = dur!"minutes"(2);
 
 /**
 Macros:
@@ -371,6 +371,9 @@ struct AutoProtocol { }
 // Returns true if the url points to an FTP resource
 private bool isFTPUrl(const(char)[] url)
 {
+    import std.algorithm.searching : startsWith;
+    import std.uni : toLower;
+
     return startsWith(url.toLower(), "ftp://", "ftps://", "ftp.") != 0;
 }
 
@@ -396,7 +399,7 @@ private template isCurlConn(Conn)
  * ----
  */
 void download(Conn = AutoProtocol)(const(char)[] url, string saveToPath, Conn conn = Conn())
-    if (isCurlConn!Conn)
+if (isCurlConn!Conn)
 {
     static if (is(Conn : HTTP) || is(Conn : FTP))
     {
@@ -415,9 +418,11 @@ void download(Conn = AutoProtocol)(const(char)[] url, string saveToPath, Conn co
     }
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
     static import std.file;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         testServer.handle((s) {
@@ -447,7 +452,7 @@ unittest
  * ----
  */
 void upload(Conn = AutoProtocol)(string loadFromPath, const(char)[] url, Conn conn = Conn())
-    if (isCurlConn!Conn)
+if (isCurlConn!Conn)
 {
     static if (is(Conn : HTTP))
     {
@@ -472,16 +477,18 @@ void upload(Conn = AutoProtocol)(string loadFromPath, const(char)[] url, Conn co
         import std.stdio : File;
         auto f = File(loadFromPath, "rb");
         conn.onSend = buf => f.rawRead(buf).length;
-        auto sz = f.size;
+        immutable sz = f.size;
         if (sz != ulong.max)
             conn.contentLength = sz;
         conn.perform();
     }
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
     static import std.file;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         auto fn = std.file.deleteme;
@@ -526,7 +533,7 @@ unittest
  * See_Also: $(LREF HTTP.Method)
  */
 T[] get(Conn = AutoProtocol, T = char)(const(char)[] url, Conn conn = Conn())
-    if ( isCurlConn!Conn && (is(T == char) || is(T == ubyte)) )
+if ( isCurlConn!Conn && (is(T == char) || is(T == ubyte)) )
 {
     static if (is(Conn : HTTP))
     {
@@ -547,8 +554,10 @@ T[] get(Conn = AutoProtocol, T = char)(const(char)[] url, Conn conn = Conn())
     }
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         testServer.handle((s) {
@@ -598,8 +607,10 @@ if (is(T == char) || is(T == ubyte))
     return _basicHTTP!(T)(url, postData, conn);
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         testServer.handle((s) {
@@ -613,11 +624,13 @@ unittest
     }
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+
     auto data = new ubyte[](256);
     foreach (i, ref ub; data)
-        ub = cast(ubyte)i;
+        ub = cast(ubyte) i;
 
     testServer.handle((s) {
         auto req = s.recvReq!ubyte;
@@ -638,7 +651,7 @@ if (is(T == char) || is(T == ubyte))
     return post(url, urlEncode(postDict), conn);
 }
 
-unittest
+@system unittest
 {
     foreach (host; [testServer.addr, "http://" ~ testServer.addr])
     {
@@ -681,7 +694,7 @@ unittest
  */
 T[] put(Conn = AutoProtocol, T = char, PutUnit)(const(char)[] url, const(PutUnit)[] putData,
                                                   Conn conn = Conn())
-    if ( isCurlConn!Conn && (is(T == char) || is(T == ubyte)) )
+if ( isCurlConn!Conn && (is(T == char) || is(T == ubyte)) )
 {
     static if (is(Conn : HTTP))
     {
@@ -701,8 +714,10 @@ T[] put(Conn = AutoProtocol, T = char, PutUnit)(const(char)[] url, const(PutUnit
     }
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         testServer.handle((s) {
@@ -733,7 +748,7 @@ unittest
  * See_Also: $(LREF HTTP.Method)
  */
 void del(Conn = AutoProtocol)(const(char)[] url, Conn conn = Conn())
-    if (isCurlConn!Conn)
+if (isCurlConn!Conn)
 {
     static if (is(Conn : HTTP))
     {
@@ -742,6 +757,10 @@ void del(Conn = AutoProtocol)(const(char)[] url, Conn conn = Conn())
     }
     else static if (is(Conn : FTP))
     {
+        import std.algorithm.searching : findSplitAfter;
+        import std.conv : text;
+        import std.exception : enforce;
+
         auto trimmed = url.findSplitAfter("ftp://")[1];
         auto t = trimmed.findSplitAfter("/");
         enum minDomainNameLength = 3;
@@ -763,8 +782,10 @@ void del(Conn = AutoProtocol)(const(char)[] url, Conn conn = Conn())
     }
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         testServer.handle((s) {
@@ -801,24 +822,16 @@ unittest
  * See_Also: $(LREF HTTP.Method)
  */
 T[] options(T = char)(const(char)[] url, HTTP conn = HTTP())
-    if (is(T == char) || is(T == ubyte))
+if (is(T == char) || is(T == ubyte))
 {
     conn.method = HTTP.Method.options;
     return _basicHTTP!(T)(url, null, conn);
 }
 
-// Explicitly undocumented. It will be removed in February 2017. @@@DEPRECATED_2017-02@@@
-deprecated("options does not send any data")
-T[] options(T = char, OptionsUnit)(const(char)[] url,
-                                   const(OptionsUnit)[] optionsData = null,
-                                   HTTP conn = HTTP())
-    if (is(T == char) || is(T == ubyte))
+@system unittest
 {
-    return options!T(url, conn);
-}
+    import std.algorithm.searching : canFind;
 
-unittest
-{
     testServer.handle((s) {
         auto req = s.recvReq;
         assert(req.hdrs.canFind("OPTIONS /path"));
@@ -851,14 +864,16 @@ unittest
  * See_Also: $(LREF HTTP.Method)
  */
 T[] trace(T = char)(const(char)[] url, HTTP conn = HTTP())
-   if (is(T == char) || is(T == ubyte))
+if (is(T == char) || is(T == ubyte))
 {
     conn.method = HTTP.Method.trace;
     return _basicHTTP!(T)(url, cast(void[]) null, conn);
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+
     testServer.handle((s) {
         auto req = s.recvReq;
         assert(req.hdrs.canFind("TRACE /path"));
@@ -890,14 +905,16 @@ unittest
  * See_Also: $(LREF HTTP.Method)
  */
 T[] connect(T = char)(const(char)[] url, HTTP conn = HTTP())
-   if (is(T == char) || is(T == ubyte))
+if (is(T == char) || is(T == ubyte))
 {
     conn.method = HTTP.Method.connect;
     return _basicHTTP!(T)(url, cast(void[]) null, conn);
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+
     testServer.handle((s) {
         auto req = s.recvReq;
         assert(req.hdrs.canFind("CONNECT /path"));
@@ -934,14 +951,16 @@ unittest
  */
 T[] patch(T = char, PatchUnit)(const(char)[] url, const(PatchUnit)[] patchData,
                                HTTP conn = HTTP())
-    if (is(T == char) || is(T == ubyte))
+if (is(T == char) || is(T == ubyte))
 {
     conn.method = HTTP.Method.patch;
     return _basicHTTP!(T)(url, patchData, conn);
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+
     testServer.handle((s) {
         auto req = s.recvReq;
         assert(req.hdrs.canFind("PATCH /path"));
@@ -961,6 +980,11 @@ unittest
  */
 private auto _basicHTTP(T)(const(char)[] url, const(void)[] sendData, HTTP client)
 {
+    import std.algorithm.comparison : min;
+    import std.format : format;
+    import std.exception : enforce;
+    import etc.c.curl : CurlSeek, CurlSeekPos;
+
     immutable doSend = sendData !is null &&
         (client.method == HTTP.Method.post ||
          client.method == HTTP.Method.put ||
@@ -997,7 +1021,7 @@ private auto _basicHTTP(T)(const(char)[] url, const(void)[] sendData, HTTP clien
         {
             size_t minLen = min(buf.length, remainingData.length);
             if (minLen == 0) return 0;
-            buf[0..minLen] = remainingData[0..minLen];
+            buf[0 .. minLen] = remainingData[0 .. minLen];
             remainingData = remainingData[minLen..$];
             return minLen;
         };
@@ -1006,7 +1030,7 @@ private auto _basicHTTP(T)(const(char)[] url, const(void)[] sendData, HTTP clien
             switch (mode)
             {
                 case CurlSeekPos.set:
-                    remainingData = sendData[cast(size_t)offset..$];
+                    remainingData = sendData[cast(size_t) offset..$];
                     return CurlSeek.ok;
                 default:
                     // As of curl 7.18.0, libcurl will not pass
@@ -1027,27 +1051,32 @@ private auto _basicHTTP(T)(const(char)[] url, const(void)[] sendData, HTTP clien
     };
     client.onReceiveStatusLine = (HTTP.StatusLine l) { statusLine = l; };
     client.perform();
-    enforce!CurlException(statusLine.code / 100 == 2,
-                            format("HTTP request returned status code %d (%s)",
-                                   statusLine.code, statusLine.reason));
+    enforce(statusLine.code / 100 == 2, new HTTPStatusException(statusLine.code,
+            format("HTTP request returned status code %d (%s)", statusLine.code, statusLine.reason)));
 
     return _decodeContent!T(content.data, client.p.charset);
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+    import std.exception : collectException;
+
     testServer.handle((s) {
         auto req = s.recvReq;
         assert(req.hdrs.canFind("GET /path"));
         s.send(httpNotFound());
     });
-    auto e = collectException!CurlException(get(testServer.addr ~ "/path"));
+    auto e = collectException!HTTPStatusException(get(testServer.addr ~ "/path"));
     assert(e.msg == "HTTP request returned status code 404 (Not Found)");
+    assert(e.status == 404);
 }
 
 // Bugzilla 14760 - content length must be reset after post
-unittest
+@system unittest
 {
+    import std.algorithm.searching : canFind;
+
     testServer.handle((s) {
         auto req = s.recvReq;
         assert(req.hdrs.canFind("POST /"));
@@ -1069,7 +1098,7 @@ unittest
     assert(res == "TRACERESPONSE");
 }
 
-unittest // charset detection and transcoding to T
+@system unittest // charset detection and transcoding to T
 {
     testServer.handle((s) {
         s.send("HTTP/1.1 200 OK\r\n"~
@@ -1102,6 +1131,8 @@ unittest // charset detection and transcoding to T
  */
 private auto _basicFTP(T)(const(char)[] url, const(void)[] sendData, FTP client)
 {
+    import std.algorithm.comparison : min;
+
     scope (exit)
     {
         client.onReceive = null;
@@ -1128,7 +1159,7 @@ private auto _basicFTP(T)(const(char)[] url, const(void)[] sendData, FTP client)
         {
             size_t minLen = min(buf.length, sendData.length);
             if (minLen == 0) return 0;
-            buf[0..minLen] = sendData[0..minLen];
+            buf[0 .. minLen] = sendData[0 .. minLen];
             sendData = sendData[minLen..$];
             return minLen;
         };
@@ -1150,6 +1181,9 @@ private auto _decodeContent(T)(ubyte[] content, string encoding)
     }
     else
     {
+        import std.exception : enforce;
+        import std.format : format;
+
         // Optimally just return the utf8 encoded content
         if (encoding == "UTF-8")
             return cast(char[])(content);
@@ -1253,12 +1287,16 @@ if (isCurlConn!Conn && isSomeChar!Char && isSomeChar!Terminator)
 
         @property @safe Char[] front()
         {
+            import std.exception : enforce;
             enforce!CurlException(currentValid, "Cannot call front() on empty range");
             return current;
         }
 
         void popFront()
         {
+            import std.algorithm.searching : findSplitAfter, findSplit;
+            import std.exception : enforce;
+
             enforce!CurlException(currentValid, "Cannot call popFront() on empty range");
             if (lines.empty)
             {
@@ -1293,8 +1331,10 @@ if (isCurlConn!Conn && isSomeChar!Char && isSomeChar!Terminator)
     return SyncLineInputRange(result, keepTerminator == Yes.keepTerminator, terminator);
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.comparison : equal;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         testServer.handle((s) {
@@ -1328,7 +1368,7 @@ unittest
  */
 auto byChunk(Conn = AutoProtocol)
             (const(char)[] url, size_t chunkSize = 1024, Conn conn = Conn())
-    if (isCurlConn!(Conn))
+if (isCurlConn!(Conn))
 {
     static struct SyncChunkInputRange
     {
@@ -1351,7 +1391,7 @@ auto byChunk(Conn = AutoProtocol)
         {
             size_t nextOffset = offset + chunkSize;
             if (nextOffset > _bytes.length) nextOffset = _bytes.length;
-            return _bytes[offset..nextOffset];
+            return _bytes[offset .. nextOffset];
         }
 
         @safe void popFront()
@@ -1365,8 +1405,10 @@ auto byChunk(Conn = AutoProtocol)
     return SyncChunkInputRange(result, chunkSize);
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.comparison : equal;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         testServer.handle((s) {
@@ -1403,6 +1445,8 @@ private T[] _getForRange(T,Conn)(const(char)[] url, Conn conn)
  */
 private mixin template WorkerThreadProtocol(Unit, alias units)
 {
+    import core.time : Duration;
+
     @property bool empty()
     {
         tryEnsureUnits();
@@ -1411,6 +1455,7 @@ private mixin template WorkerThreadProtocol(Unit, alias units)
 
     @property Unit[] front()
     {
+        import std.format : format;
         tryEnsureUnits();
         assert(state == State.gotUnits,
                format("Expected %s but got $s",
@@ -1420,6 +1465,9 @@ private mixin template WorkerThreadProtocol(Unit, alias units)
 
     void popFront()
     {
+        import std.concurrency : send;
+        import std.format : format;
+
         tryEnsureUnits();
         assert(state == State.gotUnits,
                format("Expected %s but got $s",
@@ -1435,6 +1483,10 @@ private mixin template WorkerThreadProtocol(Unit, alias units)
     */
     bool wait(Duration d)
     {
+        import core.time : dur;
+        import std.datetime.stopwatch : StopWatch;
+        import std.concurrency : receiveTimeout;
+
         if (state == State.gotUnits)
             return true;
 
@@ -1484,6 +1536,7 @@ private mixin template WorkerThreadProtocol(Unit, alias units)
 
     void tryEnsureUnits()
     {
+        import std.concurrency : receive;
         while (true)
         {
             final switch (state)
@@ -1528,13 +1581,15 @@ private static struct AsyncLineInputRange(Char)
 
     private this(Tid tid, size_t transmitBuffers, size_t bufferSize)
     {
+        import std.concurrency : send;
+
         workerTid = tid;
         state = State.needUnits;
 
         // Send buffers to other thread for it to use.  Since no mechanism is in
         // place for moving ownership a cast to shared is done here and casted
         // back to non-shared in the receiving end.
-        foreach (i ; 0..transmitBuffers)
+        foreach (i ; 0 .. transmitBuffers)
         {
             auto arr = new Char[](bufferSize);
             workerTid.send(cast(immutable(Char[]))arr);
@@ -1605,7 +1660,7 @@ auto byLineAsync(Conn = AutoProtocol, Terminator = char, Char = char, PostUnit)
              KeepTerminator keepTerminator = No.keepTerminator,
              Terminator terminator = '\n',
              size_t transmitBuffers = 10, Conn conn = Conn())
-    if (isCurlConn!Conn && isSomeChar!Char && isSomeChar!Terminator)
+if (isCurlConn!Conn && isSomeChar!Char && isSomeChar!Terminator)
 {
     static if (is(Conn : AutoProtocol))
     {
@@ -1618,6 +1673,7 @@ auto byLineAsync(Conn = AutoProtocol, Terminator = char, Char = char, PostUnit)
     }
     else
     {
+        import std.concurrency;
         // 50 is just an arbitrary number for now
         setMaxMailboxSize(thisTid, 50, OnCrowding.block);
         auto tid = spawn(&_spawnAsync!(Conn, Char, Terminator));
@@ -1641,21 +1697,23 @@ auto byLineAsync(Conn = AutoProtocol, Terminator = char, Char = char)
     static if (is(Conn : AutoProtocol))
     {
         if (isFTPUrl(url))
-            return byLineAsync(url, cast(void[])null, keepTerminator,
+            return byLineAsync(url, cast(void[]) null, keepTerminator,
                                terminator, transmitBuffers, FTP());
         else
-            return byLineAsync(url, cast(void[])null, keepTerminator,
+            return byLineAsync(url, cast(void[]) null, keepTerminator,
                                terminator, transmitBuffers, HTTP());
     }
     else
     {
-        return byLineAsync(url, cast(void[])null, keepTerminator,
+        return byLineAsync(url, cast(void[]) null, keepTerminator,
                            terminator, transmitBuffers, conn);
     }
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.comparison : equal;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         testServer.handle((s) {
@@ -1671,6 +1729,8 @@ unittest
 // Range that reads one chunk at a time asynchronously.
 private static struct AsyncChunkInputRange
 {
+    import std.concurrency : Tid, send;
+
     private ubyte[] chunk;
     mixin WorkerThreadProtocol!(ubyte, chunk);
 
@@ -1685,7 +1745,7 @@ private static struct AsyncChunkInputRange
         // Send buffers to other thread for it to use.  Since no mechanism is in
         // place for moving ownership a cast to shared is done here and a cast
         // back to non-shared in the receiving end.
-        foreach (i ; 0..transmitBuffers)
+        foreach (i ; 0 .. transmitBuffers)
         {
             ubyte[] arr = new ubyte[](chunkSize);
             workerTid.send(cast(immutable(ubyte[]))arr);
@@ -1753,7 +1813,7 @@ auto byChunkAsync(Conn = AutoProtocol, PostUnit)
            (const(char)[] url, const(PostUnit)[] postData,
             size_t chunkSize = 1024, size_t transmitBuffers = 10,
             Conn conn = Conn())
-    if (isCurlConn!(Conn))
+if (isCurlConn!(Conn))
 {
     static if (is(Conn : AutoProtocol))
     {
@@ -1766,6 +1826,7 @@ auto byChunkAsync(Conn = AutoProtocol, PostUnit)
     }
     else
     {
+        import std.concurrency;
         // 50 is just an arbitrary number for now
         setMaxMailboxSize(thisTid, 50, OnCrowding.block);
         auto tid = spawn(&_spawnAsync!(Conn, ubyte));
@@ -1782,26 +1843,28 @@ auto byChunkAsync(Conn = AutoProtocol)
            (const(char)[] url,
             size_t chunkSize = 1024, size_t transmitBuffers = 10,
             Conn conn = Conn())
-    if (isCurlConn!(Conn))
+if (isCurlConn!(Conn))
 {
     static if (is(Conn : AutoProtocol))
     {
         if (isFTPUrl(url))
-            return byChunkAsync(url, cast(void[])null, chunkSize,
+            return byChunkAsync(url, cast(void[]) null, chunkSize,
                                 transmitBuffers, FTP());
         else
-            return byChunkAsync(url, cast(void[])null, chunkSize,
+            return byChunkAsync(url, cast(void[]) null, chunkSize,
                                 transmitBuffers, HTTP());
     }
     else
     {
-        return byChunkAsync(url, cast(void[])null, chunkSize,
+        return byChunkAsync(url, cast(void[]) null, chunkSize,
                             transmitBuffers, conn);
     }
 }
 
-unittest
+@system unittest
 {
+    import std.algorithm.comparison : equal;
+
     foreach (host; [testServer.addr, "http://"~testServer.addr])
     {
         testServer.handle((s) {
@@ -1819,6 +1882,9 @@ unittest
 private void _asyncDuplicateConnection(Conn, PostData)
     (const(char)[] url, Conn conn, PostData postData, Tid tid)
 {
+    import std.concurrency : send;
+    import std.exception : enforce;
+
     // no move semantic available in std.concurrency ie. must use casting.
     auto connDup = conn.dup();
     connDup.url = url;
@@ -1845,14 +1911,14 @@ private void _asyncDuplicateConnection(Conn, PostData)
             connDup.handle.set(CurlOption.copypostfields,
                                cast(void*) postData.ptr);
         }
-        tid.send(cast(ulong)connDup.handle.handle);
+        tid.send(cast(ulong) connDup.handle.handle);
         tid.send(connDup.method);
     }
     else
     {
         enforce!CurlException(postData is null,
                                 "Cannot put ftp data using byLineAsync()");
-        tid.send(cast(ulong)connDup.handle.handle);
+        tid.send(cast(ulong) connDup.handle.handle);
         tid.send(HTTP.Method.undefined);
     }
     connDup.p.curl.handle = null; // make sure handle is not freed
@@ -1867,6 +1933,9 @@ private void _asyncDuplicateConnection(Conn, PostData)
 */
 private mixin template Protocol()
 {
+    import etc.c.curl : CurlReadFunc;
+    import core.time : Duration;
+    import std.socket : InternetAddress;
 
     /// Value to return from $(D onSend)/$(D onReceive) delegates in order to
     /// pause a request
@@ -1984,6 +2053,7 @@ private mixin template Protocol()
     /// ditto
     @property void netInterface(const(ubyte)[4] i)
     {
+        import std.format : format;
         const str = format("%d.%d.%d.%d", i[0], i[1], i[2], i[3]);
         netInterface = str;
     }
@@ -2001,7 +2071,18 @@ private mixin template Protocol()
     */
     @property void localPort(ushort port)
     {
-        p.curl.set(CurlOption.localport, cast(long)port);
+        p.curl.set(CurlOption.localport, cast(long) port);
+    }
+
+    /**
+       Set the no proxy flag for the specified host names.
+       Params:
+       test = a list of comma host names that do not require
+              proxy to get reached
+    */
+    void setNoProxy(string hosts)
+    {
+        p.curl.set(CurlOption.noproxy, hosts);
     }
 
     /**
@@ -2013,7 +2094,7 @@ private mixin template Protocol()
     */
     @property void localPortRange(ushort range)
     {
-        p.curl.set(CurlOption.localportrange, cast(long)range);
+        p.curl.set(CurlOption.localportrange, cast(long) range);
     }
 
     /** Set the tcp no-delay socket option on or off.
@@ -2058,13 +2139,16 @@ private mixin template Protocol()
     void setAuthentication(const(char)[] username, const(char)[] password,
                            const(char)[] domain = "")
     {
+        import std.format : format;
         if (!domain.empty)
             username = format("%s/%s", domain, username);
         p.curl.set(CurlOption.userpwd, format("%s:%s", username, password));
     }
 
-    unittest
+    @system unittest
     {
+        import std.algorithm.searching : canFind;
+
         testServer.handle((s) {
             auto req = s.recvReq;
             assert(req.hdrs.canFind("GET /"));
@@ -2076,6 +2160,9 @@ private mixin template Protocol()
         http.onReceive = (ubyte[] data) { return data.length; };
         http.setAuthentication("user", "pass");
         http.perform();
+
+        // Bugzilla 17540
+        http.setNoProxy("www.example.com");
     }
 
     /**
@@ -2087,6 +2174,9 @@ private mixin template Protocol()
     */
     void setProxyAuthentication(const(char)[] username, const(char)[] password)
     {
+        import std.array : replace;
+        import std.format : format;
+
         p.curl.set(CurlOption.proxyuserpwd,
             format("%s:%s",
                 username.replace(":", "%3A"),
@@ -2114,10 +2204,10 @@ private mixin template Protocol()
      * auto client = HTTP("dlang.org");
      * client.onSend = delegate size_t(void[] data)
      * {
-     *     auto m = cast(void[])msg;
+     *     auto m = cast(void[]) msg;
      *     size_t length = m.length > data.length ? data.length : m.length;
      *     if (length == 0) return 0;
-     *     data[0..length] = m[0..length];
+     *     data[0 .. length] = m[0 .. length];
      *     msg = msg[length..$];
      *     return length;
      * };
@@ -2200,15 +2290,16 @@ decodeString(Char = char)(const(ubyte)[] data,
                           EncodingScheme scheme,
                           size_t maxChars = size_t.max)
 {
+    import std.encoding : INVALID_SEQUENCE;
     Char[] res;
     immutable startLen = data.length;
     size_t charsDecoded = 0;
     while (data.length && charsDecoded < maxChars)
     {
-        dchar dc = scheme.safeDecode(data);
+        immutable dchar dc = scheme.safeDecode(data);
         if (dc == INVALID_SEQUENCE)
         {
-            return typeof(return)(size_t.max, cast(Char[])null);
+            return typeof(return)(size_t.max, cast(Char[]) null);
         }
         charsDecoded++;
         res ~= dc;
@@ -2239,6 +2330,10 @@ private bool decodeLineInto(Terminator, Char = char)(ref const(ubyte)[] basesrc,
                                                      EncodingScheme scheme,
                                                      Terminator terminator)
 {
+    import std.algorithm.searching : endsWith;
+    import std.encoding : INVALID_SEQUENCE;
+    import std.exception : enforce;
+
     // if there is anything in the basesrc then try to decode that
     // first.
     if (basesrc.length != 0)
@@ -2249,7 +2344,7 @@ private bool decodeLineInto(Terminator, Char = char)(ref const(ubyte)[] basesrc,
                      4 : basesrc.length + src.length;
         basesrc.length = len;
 
-        dchar dc = scheme.safeDecode(basesrc);
+        immutable dchar dc = scheme.safeDecode(basesrc);
         if (dc == INVALID_SEQUENCE)
         {
             enforce!CurlException(len != 4, "Invalid code sequence");
@@ -2303,10 +2398,10 @@ private bool decodeLineInto(Terminator, Char = char)(ref const(ubyte)[] basesrc,
   * http.contentLength = msg.length;
   * http.onSend = (void[] data)
   * {
-  *     auto m = cast(void[])msg;
+  *     auto m = cast(void[]) msg;
   *     size_t len = m.length > data.length ? data.length : m.length;
   *     if (len == 0) return len;
-  *     data[0..len] = m[0..len];
+  *     data[0 .. len] = m[0 .. len];
   *     msg = msg[len..$];
   *     return len;
   * };
@@ -2326,12 +2421,16 @@ private bool decodeLineInto(Terminator, Char = char)(ref const(ubyte)[] basesrc,
   * http.perform();
   * ---
   *
-  * See_Also: $(HTTP www.ietf.org/rfc/rfc2616.txt, RFC2616)
+  * See_Also: $(_HTTP www.ietf.org/rfc/rfc2616.txt, RFC2616)
   *
   */
 struct HTTP
 {
     mixin Protocol;
+
+    import std.datetime.systime : SysTime;
+    import std.typecons : RefCounted;
+    import etc.c.curl;
 
     /// Authentication method equal to $(REF CurlAuth, etc,c,curl)
     alias AuthMethod = CurlAuth;
@@ -2362,6 +2461,11 @@ struct HTTP
         @system @property void onReceiveHeader(void delegate(in char[] key,
                                                      in char[] value) callback)
         {
+            import std.algorithm.searching : startsWith;
+            import std.conv : to;
+            import std.regex : regex, match;
+            import std.uni : toLower;
+
             // Wrap incoming callback in order to separate http status line from
             // http headers.  On redirected requests there may be several such
             // status lines. The last one is the one recorded.
@@ -2423,6 +2527,7 @@ struct HTTP
     }
 
     private RefCounted!Impl p;
+    import etc.c.curl : CurlTimeCond;
 
     /** Time condition enumeration as an alias of $(REF CurlTimeCond, etc,c,curl)
 
@@ -2546,6 +2651,8 @@ struct HTTP
     /// The URL to specify the location of the resource.
     @property void url(const(char)[] url)
     {
+        import std.algorithm.searching : startsWith;
+        import std.uni : toLower;
         if (!startsWith(url.toLower(), "http://", "https://"))
             url = "http://" ~ url;
         p.curl.set(CurlOption.url, url);
@@ -2704,10 +2811,10 @@ struct HTTP
          * auto client = HTTP("dlang.org");
          * client.onSend = delegate size_t(void[] data)
          * {
-         *     auto m = cast(void[])msg;
+         *     auto m = cast(void[]) msg;
          *     size_t length = m.length > data.length ? data.length : m.length;
          *     if (length == 0) return 0;
-         *     data[0..length] = m[0..length];
+         *     data[0 .. length] = m[0 .. length];
          *     msg = msg[length..$];
          *     return length;
          * };
@@ -2792,6 +2899,10 @@ struct HTTP
      */
     void addRequestHeader(const(char)[] name, const(char)[] value)
     {
+        import std.format : format;
+        import std.internal.cstring : tempCString;
+        import std.uni : icmp;
+
         if (icmp(name, "User-Agent") == 0)
             return setUserAgent(value);
         string nv = format("%s: %s", name, value);
@@ -2807,6 +2918,7 @@ struct HTTP
     static string defaultUserAgent() @property
     {
         import std.compiler : version_major, version_minor;
+        import std.format : format, sformat;
 
         // http://curl.haxx.se/docs/versions.html
         enum fmt = "Phobos-std.net.curl/%d.%03d (libcurl/%d.%d.%d)";
@@ -2818,7 +2930,7 @@ struct HTTP
         if (!userAgent.length)
         {
             auto curlVer = Curl.curl.version_info(CURLVERSION_NOW).version_num;
-            userAgent = cast(immutable)sformat(
+            userAgent = cast(immutable) sformat(
                 buf, fmt, version_major, version_minor,
                 curlVer >> 16 & 0xFF, curlVer >> 8 & 0xFF, curlVer & 0xFF);
         }
@@ -2834,6 +2946,46 @@ struct HTTP
     void setUserAgent(const(char)[] userAgent)
     {
         p.curl.set(CurlOption.useragent, userAgent);
+    }
+
+    /**
+     * Get various timings defined in $(REF CurlInfo, etc, c, curl).
+     * The value is usable only if the return value is equal to $(D etc.c.curl.CurlError.ok).
+     *
+     * Params:
+     *      timing = one of the timings defined in $(REF CurlInfo, etc, c, curl).
+     *               The values are:
+     *               $(D etc.c.curl.CurlInfo.namelookup_time),
+     *               $(D etc.c.curl.CurlInfo.connect_time),
+     *               $(D etc.c.curl.CurlInfo.pretransfer_time),
+     *               $(D etc.c.curl.CurlInfo.starttransfer_time),
+     *               $(D etc.c.curl.CurlInfo.redirect_time),
+     *               $(D etc.c.curl.CurlInfo.appconnect_time),
+     *               $(D etc.c.curl.CurlInfo.total_time).
+     *      val    = the actual value of the inquired timing.
+     *
+     * Returns:
+     *      The return code of the operation. The value stored in val
+     *      should be used only if the return value is $(D etc.c.curl.CurlInfo.ok).
+     *
+     * Example:
+     * ---
+     * import std.net.curl;
+     * import etc.c.curl : CurlError, CurlInfo;
+     *
+     * auto client = HTTP("dlang.org");
+     * client.perform();
+     *
+     * double val;
+     * CurlCode code;
+     *
+     * code = client.getTiming(CurlInfo.namelookup_time, val);
+     * assert(code == CurlError.ok);
+     * ---
+     */
+    CurlCode getTiming(CurlInfo timing, ref double val)
+    {
+        return p.curl.getTiming(timing, val);
     }
 
     /** The headers read from a successful response.
@@ -2974,14 +3126,16 @@ struct HTTP
         // cannot use callback when specifying data directly so it is disabled here.
         p.curl.clear(CurlOption.readfunction);
         addRequestHeader("Content-Type", contentType);
-        p.curl.set(CurlOption.postfields, cast(void*)data.ptr);
+        p.curl.set(CurlOption.postfields, cast(void*) data.ptr);
         p.curl.set(CurlOption.postfieldsize, data.length);
         if (method == Method.undefined)
             method = Method.post;
     }
 
-    unittest
+    @system unittest
     {
+        import std.algorithm.searching : canFind;
+
         testServer.handle((s) {
             auto req = s.recvReq!ubyte;
             assert(req.hdrs.canFind("POST /path"));
@@ -2991,7 +3145,7 @@ struct HTTP
         });
         auto data = new ubyte[](256);
         foreach (i, ref ub; data)
-            ub = cast(ubyte)i;
+            ub = cast(ubyte) i;
 
         auto http = HTTP(testServer.addr~"/path");
         http.postData = data;
@@ -3042,6 +3196,8 @@ struct HTTP
     */
     @property void contentLength(ulong len)
     {
+        import std.conv : to;
+
         CurlOption lenOpt;
 
         // Force post if necessary
@@ -3137,6 +3293,7 @@ struct HTTP
         ///
         string toString() const
         {
+            import std.format : format;
             return format("%s %s (%s.%s)",
                           code, reason, majorVersion, minorVersion);
         }
@@ -3144,9 +3301,10 @@ struct HTTP
 
 } // HTTP
 
-unittest // charset/Charset/CHARSET/...
+@system unittest // charset/Charset/CHARSET/...
 {
     import std.meta : AliasSeq;
+    import etc.c.curl;
 
     foreach (c; AliasSeq!("charset", "Charset", "CHARSET", "CharSet", "charSet",
         "ChArSeT", "cHaRsEt"))
@@ -3161,6 +3319,25 @@ unittest // charset/Charset/CHARSET/...
         auto http = HTTP(testServer.addr);
         http.perform();
         assert(http.p.charset == "foo");
+
+        // Bugzilla 16736
+        double val;
+        CurlCode code;
+
+        code = http.getTiming(CurlInfo.total_time, val);
+        assert(code == CurlError.ok);
+        code = http.getTiming(CurlInfo.namelookup_time, val);
+        assert(code == CurlError.ok);
+        code = http.getTiming(CurlInfo.connect_time, val);
+        assert(code == CurlError.ok);
+        code = http.getTiming(CurlInfo.pretransfer_time, val);
+        assert(code == CurlError.ok);
+        code = http.getTiming(CurlInfo.starttransfer_time, val);
+        assert(code == CurlError.ok);
+        code = http.getTiming(CurlInfo.redirect_time, val);
+        assert(code == CurlError.ok);
+        code = http.getTiming(CurlInfo.appconnect_time, val);
+        assert(code == CurlError.ok);
     }
 }
 
@@ -3173,6 +3350,9 @@ struct FTP
 {
 
     mixin Protocol;
+
+    import std.typecons : RefCounted;
+    import etc.c.curl;
 
     private struct Impl
     {
@@ -3254,6 +3434,9 @@ struct FTP
     /// The URL to specify the location of the resource.
     @property void url(const(char)[] url)
     {
+        import std.algorithm.searching : startsWith;
+        import std.uni : toLower;
+
         if (!startsWith(url.toLower(), "ftp://", "ftps://"))
             url = "ftp://" ~ url;
         p.curl.set(CurlOption.url, url);
@@ -3456,6 +3639,7 @@ struct FTP
      */
     void addCommand(const(char)[] command)
     {
+        import std.internal.cstring : tempCString;
         p.commands = Curl.curl.slist_append(p.commands,
                                             command.tempCString().buffPtr);
         p.curl.set(CurlOption.postquote, p.commands);
@@ -3478,7 +3662,73 @@ struct FTP
     */
     @property void contentLength(ulong len)
     {
+        import std.conv : to;
         p.curl.set(CurlOption.infilesize_large, to!curl_off_t(len));
+    }
+
+    /**
+     * Get various timings defined in $(REF CurlInfo, etc, c, curl).
+     * The value is usable only if the return value is equal to $(D etc.c.curl.CurlError.ok).
+     *
+     * Params:
+     *      timing = one of the timings defined in $(REF CurlInfo, etc, c, curl).
+     *               The values are:
+     *               $(D etc.c.curl.CurlInfo.namelookup_time),
+     *               $(D etc.c.curl.CurlInfo.connect_time),
+     *               $(D etc.c.curl.CurlInfo.pretransfer_time),
+     *               $(D etc.c.curl.CurlInfo.starttransfer_time),
+     *               $(D etc.c.curl.CurlInfo.redirect_time),
+     *               $(D etc.c.curl.CurlInfo.appconnect_time),
+     *               $(D etc.c.curl.CurlInfo.total_time).
+     *      val    = the actual value of the inquired timing.
+     *
+     * Returns:
+     *      The return code of the operation. The value stored in val
+     *      should be used only if the return value is $(D etc.c.curl.CurlInfo.ok).
+     *
+     * Example:
+     * ---
+     * import std.net.curl;
+     * import etc.c.curl : CurlError, CurlInfo;
+     *
+     * auto client = FTP();
+     * client.addCommand("RNFR my_file.txt");
+     * client.addCommand("RNTO my_renamed_file.txt");
+     * upload("my_file.txt", "ftp.digitalmars.com", client);
+     *
+     * double val;
+     * CurlCode code;
+     *
+     * code = client.getTiming(CurlInfo.namelookup_time, val);
+     * assert(code == CurlError.ok);
+     * ---
+     */
+    CurlCode getTiming(CurlInfo timing, ref double val)
+    {
+        return p.curl.getTiming(timing, val);
+    }
+
+    @system unittest
+    {
+        auto client = FTP();
+
+        double val;
+        CurlCode code;
+
+        code = client.getTiming(CurlInfo.total_time, val);
+        assert(code == CurlError.ok);
+        code = client.getTiming(CurlInfo.namelookup_time, val);
+        assert(code == CurlError.ok);
+        code = client.getTiming(CurlInfo.connect_time, val);
+        assert(code == CurlError.ok);
+        code = client.getTiming(CurlInfo.pretransfer_time, val);
+        assert(code == CurlError.ok);
+        code = client.getTiming(CurlInfo.starttransfer_time, val);
+        assert(code == CurlError.ok);
+        code = client.getTiming(CurlInfo.redirect_time, val);
+        assert(code == CurlError.ok);
+        code = client.getTiming(CurlInfo.appconnect_time, val);
+        assert(code == CurlError.ok);
     }
 }
 
@@ -3503,6 +3753,8 @@ struct FTP
 struct SMTP
 {
     mixin Protocol;
+    import std.typecons : RefCounted;
+    import etc.c.curl;
 
     private struct Impl
     {
@@ -3515,6 +3767,8 @@ struct SMTP
 
         @property void message(string msg)
         {
+            import std.algorithm.comparison : min;
+
             auto _message = msg;
             /**
                 This delegate reads the message text and copies it.
@@ -3523,7 +3777,7 @@ struct SMTP
             {
                 if (!msg.length) return 0;
                 size_t to_copy = min(data.length, _message.length);
-                data[0..to_copy] = (cast(void[])_message)[0..to_copy];
+                data[0 .. to_copy] = (cast(void[])_message)[0 .. to_copy];
                 _message = _message[to_copy..$];
                 return to_copy;
             };
@@ -3585,6 +3839,10 @@ struct SMTP
     /// The URL to specify the location of the resource.
     @property void url(const(char)[] url)
     {
+        import std.algorithm.searching : startsWith;
+        import std.exception : enforce;
+        import std.uni : toLower;
+
         auto lowered = url.toLower();
 
         if (lowered.startsWith("smtps://"))
@@ -3856,15 +4114,42 @@ class CurlTimeoutException : CurlException
     }
 }
 
+/++
+    Exception thrown on HTTP request failures, e.g. 404 Not Found.
++/
+class HTTPStatusException : CurlException
+{
+    /++
+        Params:
+            status = The HTTP status code.
+            msg  = The message for the exception.
+            file = The file where the exception occurred.
+            line = The line number where the exception occurred.
+            next = The previous exception in the chain of exceptions, if any.
+      +/
+    @safe pure nothrow
+    this(int status,
+         string msg,
+         string file = __FILE__,
+         size_t line = __LINE__,
+         Throwable next = null)
+    {
+        super(msg, file, line, next);
+        this.status = status;
+    }
+
+    immutable int status; /// The HTTP status code
+}
+
 /// Equal to $(REF CURLcode, etc,c,curl)
 alias CurlCode = CURLcode;
 
-import std.typecons : Flag, Yes, No;
 /// Flag to specify whether or not an exception is thrown on error.
 alias ThrowOnError = Flag!"throwOnError";
 
 private struct CurlAPI
 {
+    import etc.c.curl;
     static struct API
     {
     extern(C):
@@ -3875,6 +4160,7 @@ private struct CurlAPI
         CURL* function() easy_init;
         CURLcode function(CURL *curl, CURLoption option,...) easy_setopt;
         CURLcode function(CURL *curl) easy_perform;
+        CURLcode function(CURL *curl, CURLINFO info,...) easy_getinfo;
         CURL* function(CURL *curl) easy_duphandle;
         char* function(CURLcode) easy_strerror;
         CURLcode function(CURL *handle, int bitmask) easy_pause;
@@ -3894,6 +4180,8 @@ private struct CurlAPI
 
     static void* loadAPI()
     {
+        import std.exception : enforce;
+
         version (Posix)
         {
             import core.sys.posix.dlfcn : dlsym, dlopen, dlclose, RTLD_LAZY;
@@ -3918,6 +4206,7 @@ private struct CurlAPI
         // try to load curl from the executable to allow static linking
         if (loadSym(handle, "curl_global_init") is null)
         {
+            import std.format : format;
             version (Posix)
                 dlclose(handle);
 
@@ -3954,29 +4243,30 @@ private struct CurlAPI
         enforce!CurlException(!_api.global_init(CurlGlobal.all),
                               "Failed to initialize libcurl");
 
+        static extern(C) void cleanup()
+        {
+            if (_handle is null) return;
+            _api.global_cleanup();
+            version (Posix)
+            {
+                import core.sys.posix.dlfcn : dlclose;
+                dlclose(_handle);
+            }
+            else version (Windows)
+            {
+                import core.sys.windows.windows : FreeLibrary;
+                FreeLibrary(_handle);
+            }
+            else
+                static assert(0, "unimplemented");
+            _api = API.init;
+            _handle = null;
+        }
+
+        import core.stdc.stdlib : atexit;
+        atexit(&cleanup);
+
         return handle;
-    }
-
-    shared static ~this()
-    {
-        if (_handle is null) return;
-
-        _api.global_cleanup();
-        version (Posix)
-        {
-            import core.sys.posix.dlfcn : dlclose;
-            dlclose(_handle);
-        }
-        else version (Windows)
-        {
-            import core.sys.windows.windows : FreeLibrary;
-            FreeLibrary(_handle);
-        }
-        else
-            static assert(0, "unimplemented");
-
-        _api = API.init;
-        _handle = null;
     }
 }
 
@@ -3992,6 +4282,8 @@ private struct CurlAPI
 */
 struct Curl
 {
+    import etc.c.curl;
+
     alias OutData = void[];
     alias InData = ubyte[];
     private bool _stopped;
@@ -4018,6 +4310,7 @@ struct Curl
     */
     void initialize()
     {
+        import std.exception : enforce;
         enforce!CurlException(!handle, "Curl instance already initialized");
         handle = curl.easy_init();
         enforce!CurlException(handle, "Curl instance couldn't be initialized");
@@ -4041,6 +4334,7 @@ struct Curl
     */
     Curl dup()
     {
+        import std.meta : AliasSeq;
         Curl copy;
         copy.handle = curl.easy_duphandle(handle);
         copy._stopped = false;
@@ -4091,6 +4385,7 @@ struct Curl
 
     private void _check(CurlCode code)
     {
+        import std.exception : enforce;
         enforce!CurlTimeoutException(code != CurlError.operation_timedout,
                                        errorString(code));
 
@@ -4101,6 +4396,7 @@ struct Curl
     private string errorString(CurlCode code)
     {
         import core.stdc.string : strlen;
+        import std.format : format;
 
         auto msgZ = curl.easy_strerror(code);
         // doing the following (instead of just using std.conv.to!string) avoids 1 allocation
@@ -4109,6 +4405,7 @@ struct Curl
 
     private void throwOnStopped(string message = null)
     {
+        import std.exception : enforce;
         auto def = "Curl instance called after being cleaned up";
         enforce!CurlException(!stopped,
                                 message == null ? def : message);
@@ -4145,6 +4442,7 @@ struct Curl
     */
     void set(CurlOption option, const(char)[] value)
     {
+        import std.internal.cstring : tempCString;
         throwOnStopped();
         _check(curl.easy_setopt(this.handle, option, value.tempCString().buffPtr));
     }
@@ -4211,6 +4509,19 @@ struct Curl
         CurlCode code = curl.easy_perform(this.handle);
         if (throwOnError)
             _check(code);
+        return code;
+    }
+
+    /**
+       Get the various timings like name lookup time, total time, connect time etc.
+       The timed category is passed through the timing parameter while the timing
+       value is stored at val. The value is usable only if res is equal to
+       $(D etc.c.curl.CurlError.ok).
+    */
+    CurlCode getTiming(CurlInfo timing, ref double val)
+    {
+        CurlCode code;
+        code = curl.easy_getinfo(handle, timing, &val);
         return code;
     }
 
@@ -4306,10 +4617,10 @@ struct Curl
       * string msg = "Hello world";
       * curl.onSend = (void[] data)
       * {
-      *     auto m = cast(void[])msg;
+      *     auto m = cast(void[]) msg;
       *     size_t length = m.length > data.length ? data.length : m.length;
       *     if (length == 0) return 0;
-      *     data[0..length] = m[0..length];
+      *     data[0 .. length] = m[0 .. length];
       *     msg = msg[length..$];
       *     return length;
       * };
@@ -4449,7 +4760,7 @@ struct Curl
     {
         auto b = cast(Curl*) ptr;
         if (b._onReceive != null)
-            return b._onReceive(cast(InData)(str[0..size*nmemb]));
+            return b._onReceive(cast(InData)(str[0 .. size*nmemb]));
         return size*nmemb;
     }
 
@@ -4457,8 +4768,10 @@ struct Curl
     size_t _receiveHeaderCallback(const char* str,
                                   size_t size, size_t nmemb, void* ptr)
     {
+        import std.string : chomp;
+
         auto b = cast(Curl*) ptr;
-        auto s = str[0..size*nmemb].chomp();
+        auto s = str[0 .. size*nmemb].chomp();
         if (b._onReceiveHeader != null)
             b._onReceiveHeader(s);
 
@@ -4469,7 +4782,7 @@ struct Curl
     size_t _sendCallback(char *str, size_t size, size_t nmemb, void *ptr)
     {
         Curl* b = cast(Curl*) ptr;
-        auto a = cast(void[]) str[0..size*nmemb];
+        auto a = cast(void[]) str[0 .. size*nmemb];
         if (b._onSend == null)
             return 0;
         return b._onSend(a);
@@ -4509,8 +4822,8 @@ struct Curl
             return 0;
 
         // return: 0 ok, 1 fail
-        return b._onProgress(cast(size_t)dltotal, cast(size_t)dlnow,
-                             cast(size_t)ultotal, cast(size_t)ulnow);
+        return b._onProgress(cast(size_t) dltotal, cast(size_t) dlnow,
+                             cast(size_t) ultotal, cast(size_t) ulnow);
     }
 
 }
@@ -4562,6 +4875,7 @@ private struct Pool(Data)
 
     @safe Data pop()
     {
+        import std.exception : enforce;
         enforce!Exception(root != null, "pop() called on empty pool");
         auto d = root.data;
         auto n = root.next;
@@ -4579,6 +4893,8 @@ private static size_t _receiveAsyncChunks(ubyte[] data, ref ubyte[] outdata,
                                           ref ubyte[] buffer, Tid fromTid,
                                           ref bool aborted)
 {
+    import std.concurrency : receive, send, thisTid;
+
     immutable datalen = data.length;
 
     // Copy data to fill active buffer
@@ -4594,12 +4910,12 @@ private static size_t _receiveAsyncChunks(ubyte[] data, ref ubyte[] outdata,
             // them.
             receive((immutable(ubyte)[] buf)
                     {
-                        buffer = cast(ubyte[])buf;
+                        buffer = cast(ubyte[]) buf;
                         outdata = buffer[];
                     },
                     (bool flag) { aborted = true; }
                     );
-            if (aborted) return cast(size_t)0;
+            if (aborted) return cast(size_t) 0;
         }
         if (outdata.empty)
         {
@@ -4611,7 +4927,7 @@ private static size_t _receiveAsyncChunks(ubyte[] data, ref ubyte[] outdata,
         auto copyBytes = outdata.length < data.length ?
             outdata.length : data.length;
 
-        outdata[0..copyBytes] = data[0..copyBytes];
+        outdata[0 .. copyBytes] = data[0 .. copyBytes];
         outdata = outdata[copyBytes..$];
         data = data[copyBytes..$];
 
@@ -4626,6 +4942,7 @@ private static size_t _receiveAsyncChunks(ubyte[] data, ref ubyte[] outdata,
 private static void _finalizeAsyncChunks(ubyte[] outdata, ref ubyte[] buffer,
                                          Tid fromTid)
 {
+    import std.concurrency : send, thisTid;
     if (!outdata.empty)
     {
         // Resize the last buffer
@@ -4644,6 +4961,10 @@ private static size_t _receiveAsyncLines(Terminator, Unit)
      ref Pool!(Unit[]) freeBuffers, ref Unit[] buffer,
      Tid fromTid, ref bool aborted)
 {
+    import std.concurrency : prioritySend, receive, send, thisTid;
+    import std.exception : enforce;
+    import std.format : format;
+    import std.traits : isArray;
 
     immutable datalen = data.length;
 
@@ -4664,14 +4985,14 @@ private static size_t _receiveAsyncLines(Terminator, Unit)
             // reuse them.
             receive((immutable(Unit)[] buf)
                     {
-                        buffer = cast(Unit[])buf;
+                        buffer = cast(Unit[]) buf;
                         buffer.length = 0;
                         buffer.assumeSafeAppend();
                         bufferValid = true;
                     },
                     (bool flag) { aborted = true; }
                     );
-            if (aborted) return cast(size_t)0;
+            if (aborted) return cast(size_t) 0;
         }
         if (!bufferValid)
         {
@@ -4723,7 +5044,7 @@ private static size_t _receiveAsyncLines(Terminator, Unit)
         catch (CurlException ex)
         {
             prioritySend(fromTid, cast(immutable(CurlException))ex);
-            return cast(size_t)0;
+            return cast(size_t) 0;
         }
     }
     return datalen;
@@ -4733,6 +5054,7 @@ private static size_t _receiveAsyncLines(Terminator, Unit)
 private static
 void _finalizeAsyncLines(Unit)(bool bufferValid, Unit[] buffer, Tid fromTid)
 {
+    import std.concurrency : send, thisTid;
     if (bufferValid && buffer.length != 0)
         fromTid.send(thisTid, curlMessage(cast(immutable(Unit)[])buffer[0..$]));
 }
@@ -4744,6 +5066,8 @@ void _finalizeAsyncLines(Unit)(bool bufferValid, Unit[] buffer, Tid fromTid)
 // output (e.g. AsyncHTTPLineOutputRange).
 private static void _spawnAsync(Conn, Unit, Terminator = void)()
 {
+    import std.concurrency : prioritySend, receiveOnly, send, thisTid;
+    import etc.c.curl : CURL, CurlError;
     Tid fromTid = receiveOnly!Tid();
 
     // Get buffer to read into
@@ -4773,7 +5097,7 @@ private static void _spawnAsync(Conn, Unit, Terminator = void)()
     }
 
     // no move semantic available in std.concurrency ie. must use casting.
-    auto connDup = cast(CURL*)receiveOnly!ulong();
+    auto connDup = cast(CURL*) receiveOnly!ulong();
     auto client = Conn();
     client.p.curl.handle = connDup;
 
