@@ -4379,6 +4379,14 @@ template TemplateOf(T : Base!Args, alias Base, Args...)
     alias TemplateOf = Base;
 }
 
+// !!!
+// New versions of D added this
+template TemplateOf(T)
+{
+    alias TemplateOf = void;
+}
+// !!!
+
 ///
 @safe unittest
 {

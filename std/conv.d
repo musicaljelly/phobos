@@ -58,10 +58,8 @@ import std.traits;
 // Also helps with missing imports errors.
 package template convFormat()
 {
-    import std.format : formatCTFE;
-    // !!!
-    alias convFormat = formatCTFE;
-    // !!!
+    import std.format : format;
+    alias convFormat = format;
 }
 
 /* ************* Exceptions *************** */

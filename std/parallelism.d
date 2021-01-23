@@ -1519,7 +1519,7 @@ public:
     {
         // !!!
         // Clamp it so we don't overrun the idleThreadsReportedIn array
-        import std.algorithm.comparison : max;
+        import std.algorithm.comparison : min;
         nWorkers = min(nWorkers, MAX_WORKER_THREADS);
         // !!!
 

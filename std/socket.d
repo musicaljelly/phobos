@@ -1277,6 +1277,8 @@ abstract class Address
     // Must be overridden for variable-length addresses.
     protected void setNameLen(socklen_t len)
     {
+        import std.format : format;
+
         if (len != this.nameLen)
             throw new AddressException(
                 format("%s expects address of length %d, not %d", typeid(this),

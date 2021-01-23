@@ -859,6 +859,7 @@ abstract class Logger
         static if (isLoggingActive)
         {
             // !!!
+            import std.exception : assumeUnique;
             header.msg = msgAppender.data.assumeUnique();
             // !!!
             this.writeLogMsg(header);
