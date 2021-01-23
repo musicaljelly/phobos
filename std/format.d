@@ -1,4 +1,4 @@
-﻿// Written in the D programming language.
+// Written in the D programming language.
 
 /**
    This module implements the formatting functionality for strings and
@@ -2771,18 +2771,18 @@ if (is(StringTypeOf!T) && !is(StaticArrayTypeOf!T) && !is(T == enum) && !hasToSt
     formatTest( "%-r", "ab"c, ['a'         , 'b'         ] );
     formatTest( "%-r", "ab"w, ['a', 0      , 'b', 0      ] );
     formatTest( "%-r", "ab"d, ['a', 0, 0, 0, 'b', 0, 0, 0] );
-    formatTest( "%-r", "Ã¦â€”Â¥Ã¦Å“Â¬Ã¨ÂªÅ¾"c, ['\xe6', '\x97', '\xa5', '\xe6', '\x9c', '\xac', '\xe8', '\xaa', '\x9e'] );
-    formatTest( "%-r", "Ã¦â€”Â¥Ã¦Å“Â¬Ã¨ÂªÅ¾"w, ['\xe5', '\x65', '\x2c', '\x67', '\x9e', '\x8a']);
-    formatTest( "%-r", "Ã¦â€”Â¥Ã¦Å“Â¬Ã¨ÂªÅ¾"d, ['\xe5', '\x65', '\x00', '\x00', '\x2c', '\x67',
+    formatTest( "%-r", "日本語"c, ['\xe6', '\x97', '\xa5', '\xe6', '\x9c', '\xac', '\xe8', '\xaa', '\x9e'] );
+    formatTest( "%-r", "日本語"w, ['\xe5', '\x65', '\x2c', '\x67', '\x9e', '\x8a']);
+    formatTest( "%-r", "日本語"d, ['\xe5', '\x65', '\x00', '\x00', '\x2c', '\x67',
         '\x00', '\x00', '\x9e', '\x8a', '\x00', '\x00'] );
 
     //Big Endian
     formatTest( "%+r", "ab"c, [         'a',          'b'] );
     formatTest( "%+r", "ab"w, [      0, 'a',       0, 'b'] );
     formatTest( "%+r", "ab"d, [0, 0, 0, 'a', 0, 0, 0, 'b'] );
-    formatTest( "%+r", "Ã¦â€”Â¥Ã¦Å“Â¬Ã¨ÂªÅ¾"c, ['\xe6', '\x97', '\xa5', '\xe6', '\x9c', '\xac', '\xe8', '\xaa', '\x9e'] );
-    formatTest( "%+r", "Ã¦â€”Â¥Ã¦Å“Â¬Ã¨ÂªÅ¾"w, ['\x65', '\xe5', '\x67', '\x2c', '\x8a', '\x9e'] );
-    formatTest( "%+r", "Ã¦â€”Â¥Ã¦Å“Â¬Ã¨ÂªÅ¾"d, ['\x00', '\x00', '\x65', '\xe5', '\x00', '\x00',
+    formatTest( "%+r", "日本語"c, ['\xe6', '\x97', '\xa5', '\xe6', '\x9c', '\xac', '\xe8', '\xaa', '\x9e'] );
+    formatTest( "%+r", "日本語"w, ['\x65', '\xe5', '\x67', '\x2c', '\x8a', '\x9e'] );
+    formatTest( "%+r", "日本語"d, ['\x00', '\x00', '\x65', '\xe5', '\x00', '\x00',
         '\x67', '\x2c', '\x00', '\x00', '\x8a', '\x9e'] );
 }
 
@@ -5361,6 +5361,91 @@ if (isInputRange!Range)
     return unformatValue!T(input, spec);
 }
 
+
+// Legacy implementation
+
+enum Mangle : char
+{
+    Tvoid     = 'v',
+    Tbool     = 'b',
+    Tbyte     = 'g',
+    Tubyte    = 'h',
+    Tshort    = 's',
+    Tushort   = 't',
+    Tint      = 'i',
+    Tuint     = 'k',
+    Tlong     = 'l',
+    Tulong    = 'm',
+    Tfloat    = 'f',
+    Tdouble   = 'd',
+    Treal     = 'e',
+
+    Tifloat   = 'o',
+    Tidouble  = 'p',
+    Tireal    = 'j',
+    Tcfloat   = 'q',
+    Tcdouble  = 'r',
+    Tcreal    = 'c',
+
+    Tchar     = 'a',
+    Twchar    = 'u',
+    Tdchar    = 'w',
+
+    Tarray    = 'A',
+    Tsarray   = 'G',
+    Taarray   = 'H',
+    Tpointer  = 'P',
+    Tfunction = 'F',
+    Tident    = 'I',
+    Tclass    = 'C',
+    Tstruct   = 'S',
+    Tenum     = 'E',
+    Ttypedef  = 'T',
+    Tdelegate = 'D',
+
+    Tconst    = 'x',
+    Timmutable = 'y',
+}
+
+// return the TypeInfo for a primitive type and null otherwise.  This
+// is required since for arrays of ints we only have the mangled char
+// to work from. If arrays always subclassed TypeInfo_Array this
+// routine could go away.
+private TypeInfo primitiveTypeInfo(Mangle m)
+{
+    // BUG: should fix this in static this() to avoid double checked locking bug
+    __gshared TypeInfo[Mangle] dic;
+    if (!dic.length)
+    {
+        dic = [
+            Mangle.Tvoid : typeid(void),
+            Mangle.Tbool : typeid(bool),
+            Mangle.Tbyte : typeid(byte),
+            Mangle.Tubyte : typeid(ubyte),
+            Mangle.Tshort : typeid(short),
+            Mangle.Tushort : typeid(ushort),
+            Mangle.Tint : typeid(int),
+            Mangle.Tuint : typeid(uint),
+            Mangle.Tlong : typeid(long),
+            Mangle.Tulong : typeid(ulong),
+            Mangle.Tfloat : typeid(float),
+            Mangle.Tdouble : typeid(double),
+            Mangle.Treal : typeid(real),
+            Mangle.Tifloat : typeid(ifloat),
+            Mangle.Tidouble : typeid(idouble),
+            Mangle.Tireal : typeid(ireal),
+            Mangle.Tcfloat : typeid(cfloat),
+            Mangle.Tcdouble : typeid(cdouble),
+            Mangle.Tcreal : typeid(creal),
+            Mangle.Tchar : typeid(char),
+            Mangle.Twchar : typeid(wchar),
+            Mangle.Tdchar : typeid(dchar)
+            ];
+    }
+    auto p = m in dic;
+    return p ? *p : null;
+}
+
 private bool needToSwapEndianess(Char)(const ref FormatSpec!Char f)
 {
     import std.system : endian, Endian;
@@ -5963,7 +6048,7 @@ char[] sformat(Char, Args...)(char[] buf, in Char[] fmt, Args args)
     assert(tmp == "1ä234ä567.891", "'" ~ tmp ~ "'");
 
     tmp = format("%,*?.3f", 1, 'ä', 1234567.891011);
-    assert(tmp == "1ä2ä3ä4ä5ä6ä7.891", "'" ~ tmp ~ "'");
+    assert(tmp == "1ä2ä3ä4ä5ä6ä7.8ä9ä1", "'" ~ tmp ~ "'");
 
     tmp = format("%,4?.3f", '_', 1234567.891011);
     assert(tmp == "123_4567.891", "'" ~ tmp ~ "'");

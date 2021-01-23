@@ -705,7 +705,6 @@ CHARACTER = $(S_LINK Character, character)
 CHARACTERS = $(S_LINK Character, characters)
 CLUSTER = $(S_LINK Grapheme cluster, grapheme cluster)
 +/
-
 module std.uni;
 
 import std.meta; // AliasSeq

@@ -66,7 +66,6 @@ Authors:   $(HTTP erdani.org, Andrei Alexandrescu),
            Shin Fujishiro,
            Kenji Hara
  */
-
 module std.typecons;
 
 import core.stdc.stdint : uintptr_t;
