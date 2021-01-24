@@ -14,7 +14,7 @@ import std.regex.internal.ir;
     regular expressions.
 +/
 @trusted class BacktrackingMatcher(Char, Stream = Input!Char) : Matcher!Char
-    if (is(Char : dchar))
+if (is(Char : dchar))
 {
     alias DataIndex = Stream.DataIndex;
     struct State
@@ -170,6 +170,15 @@ final:
         backtracking.index = index;
         backtracking.exhausted = exhausted;
         backtracking.initExternalMemory(memBlock);
+    }
+
+    override Matcher!Char rearm(in Char[] data)
+    {
+        merge[] = Trace.init;
+        exhausted = false;
+        s = Stream(data);
+        next();
+        return this;
     }
 
     this(ref const RegEx program, Stream stream, void[] memBlock, dchar ch, DataIndex idx)
@@ -807,8 +816,6 @@ final:
     return format;
 }
 
-alias Sequence(int B, int E) = staticIota!(B, E);
-
 struct CtContext
 {
     import std.conv : to, text;
@@ -827,7 +834,7 @@ struct CtContext
         int addr;
     }
 
-    this(Char)(const Regex!Char re)
+    this(Char)(ref const Regex!Char re)
     {
         match = 1;
         reserved = 1; //first match is skipped

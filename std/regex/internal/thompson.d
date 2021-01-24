@@ -70,7 +70,7 @@ struct ThreadList(DataIndex)
         this(ThreadList tlist){ ct = tlist.tip; }
         @property bool empty(){ return ct is null; }
         @property const(Thread!DataIndex)* front(){ return ct; }
-        @property popFront()
+        void popFront()
         {
             assert(ct);
             ct = ct.next;
@@ -847,7 +847,15 @@ final:
         }
     }
 
-    this()(const Regex!Char program, Stream stream, void[] memory)
+    override Matcher!Char rearm(in Char[] data)
+    {
+        exhausted = false;
+        matched = 0;
+        s = Stream(data);
+        return this;
+    }
+
+    this()(ref const Regex!Char program, Stream stream, void[] memory)
     {
          // We are emplace'd to malloced memory w/o blitting T.init over it\
          // make sure we initialize all fields explicitly

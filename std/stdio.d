@@ -4,7 +4,7 @@
 Standard I/O functions that extend $(B core.stdc.stdio).  $(B core.stdc.stdio)
 is $(D_PARAM public)ally imported when importing $(B std.stdio).
 
-Source: $(PHOBOSSRC std/_stdio.d)
+Source: $(PHOBOSSRC std/stdio.d)
 Copyright: Copyright Digital Mars 2007-.
 License:   $(HTTP boost.org/LICENSE_1_0.txt, Boost License 1.0).
 Authors:   $(HTTP digitalmars.com, Walter Bright),
@@ -23,7 +23,7 @@ import std.traits; // isSomeChar, isSomeString, Unqual, isPointer
 import std.typecons; // Flag
 
 /++
-If flag $(D KeepTerminator) is set to $(D KeepTerminator.yes), then the delimiter
+If flag `KeepTerminator` is set to `KeepTerminator.yes`, then the delimiter
 is included in the strings returned.
 +/
 alias KeepTerminator = Flag!"keepTerminator";
@@ -44,32 +44,44 @@ version (CRuntime_Glibc)
     version = GCC_IO;
     version = HAS_GETDELIM;
 }
+else version (CRuntime_Bionic)
+{
+    version = GENERIC_IO;
+    version = HAS_GETDELIM;
+}
+else version (CRuntime_Musl)
+{
+    version = GENERIC_IO;
+    version = HAS_GETDELIM;
+}
+else version (CRuntime_UClibc)
+{
+    // uClibc supports GCC IO
+    version = GCC_IO;
+    version = HAS_GETDELIM;
+}
 
 version (OSX)
 {
     version = GENERIC_IO;
     version = HAS_GETDELIM;
 }
-
-version (FreeBSD)
+else version (FreeBSD)
 {
     version = GENERIC_IO;
     version = HAS_GETDELIM;
 }
-
-version (NetBSD)
+else version (NetBSD)
 {
     version = GENERIC_IO;
     version = HAS_GETDELIM;
 }
-
-version (Solaris)
+else version (DragonFlyBSD)
 {
     version = GENERIC_IO;
-    version = NO_GETDELIM;
+    version = HAS_GETDELIM;
 }
-
-version (CRuntime_Bionic)
+else version (Solaris)
 {
     version = GENERIC_IO;
     version = NO_GETDELIM;
@@ -246,7 +258,7 @@ version(HAS_GETDELIM) extern(C) nothrow @nogc
 }
 
 //------------------------------------------------------------------------------
-struct ByRecord(Fields...)
+private struct ByRecordImpl(Fields...)
 {
 private:
     import std.typecons : Tuple;
@@ -301,24 +313,32 @@ public:
     }
 }
 
+// @@@DEPRECATED_2019-01@@@
+deprecated("Use .byRecord")
+struct ByRecord(Fields...)
+{
+    ByRecordImpl!Fields payload;
+    alias payload this;
+}
+
 template byRecord(Fields...)
 {
-    ByRecord!(Fields) byRecord(File f, string format)
+    auto byRecord(File f, string format)
     {
         return typeof(return)(f, format);
     }
 }
 
 /**
-Encapsulates a $(D FILE*). Generally D does not attempt to provide
+Encapsulates a `FILE*`. Generally D does not attempt to provide
 thin wrappers over equivalent functions in the C standard library, but
-manipulating $(D FILE*) values directly is unsafe and error-prone in
-many ways. The $(D File) type ensures safe manipulation, automatic
+manipulating `FILE*` values directly is unsafe and error-prone in
+many ways. The `File` type ensures safe manipulation, automatic
 file closing, and a lot of convenience.
 
-The underlying $(D FILE*) handle is maintained in a reference-counted
-manner, such that as soon as the last $(D File) variable bound to a
-given $(D FILE*) goes out of scope, the underlying $(D FILE*) is
+The underlying `FILE*` handle is maintained in a reference-counted
+manner, such that as soon as the last `File` variable bound to a
+given `FILE*` goes out of scope, the underlying `FILE*` is
 automatically closed.
 
 Example:
@@ -349,6 +369,7 @@ Hello, Jimmy!
  */
 struct File
 {
+    import core.atomic : atomicOp, atomicStore, atomicLoad;
     import std.range.primitives : ElementEncodingType;
     import std.traits : isScalarType, isArray;
     enum Orientation { unknown, narrow, wide }
@@ -356,7 +377,7 @@ struct File
     private struct Impl
     {
         FILE * handle = null; // Is null iff this Impl is closed by another File
-        uint refs = uint.max / 2;
+        shared uint refs = uint.max / 2;
         bool isPopened; // true iff the stream has been created by popen()
         Orientation orientation;
     }
@@ -377,7 +398,7 @@ struct File
     {
         assert(_p);
         _p.handle = handle;
-        _p.refs = refs;
+        atomicStore(_p.refs, refs);
         _p.isPopened = isPopened;
         _p.orientation = Orientation.unknown;
         _name = name;
@@ -386,10 +407,10 @@ struct File
 /**
 Constructor taking the name of the file to open and the open mode.
 
-Copying one $(D File) object to another results in the two $(D File)
+Copying one `File` object to another results in the two `File`
 objects referring to the same underlying file.
 
-The destructor automatically closes the file as soon as no $(D File)
+The destructor automatically closes the file as soon as no `File`
 object refers to it anymore.
 
 Params:
@@ -399,9 +420,9 @@ Params:
         $(HTTP cplusplus.com/reference/clibrary/cstdio/fopen.html, fopen)
         function)
 
-Throws: $(D ErrnoException) if the file could not be opened.
+Throws: `ErrnoException` if the file could not be opened.
  */
-    this(string name, in char[] stdioOpenmode = "rb") @safe
+    this(string name, scope const(char)[] stdioOpenmode = "rb") @safe
     {
         import std.conv : text;
         import std.exception : errnoEnforce;
@@ -453,8 +474,8 @@ Throws: $(D ErrnoException) if the file could not be opened.
     this(this) @safe nothrow
     {
         if (!_p) return;
-        assert(_p.refs);
-        ++_p.refs;
+        assert(atomicLoad(_p.refs));
+        atomicOp!"+="(_p.refs, 1);
     }
 
 /**
@@ -471,38 +492,30 @@ file.
 
 /**
 Detaches from the current file (throwing on failure), and then attempts to
-_open file $(D name) with mode $(D stdioOpenmode). The mode has the
+_open file `name` with mode `stdioOpenmode`. The mode has the
 same semantics as in the C standard library $(HTTP
 cplusplus.com/reference/clibrary/cstdio/fopen.html, fopen) function.
 
-Throws: $(D ErrnoException) in case of error.
+Throws: `ErrnoException` in case of error.
  */
-    void open(string name, in char[] stdioOpenmode = "rb") @trusted
+    void open(string name, scope const(char)[] stdioOpenmode = "rb") @trusted
     {
         resetFile(name, stdioOpenmode, false);
     }
 
-    private void resetFile(string name, in char[] stdioOpenmode, bool isPopened) @trusted
+    private void resetFile(string name, scope const(char)[] stdioOpenmode, bool isPopened) @trusted
     {
         import core.stdc.stdlib : malloc;
         import std.exception : enforce;
         import std.conv : text;
         import std.exception : errnoEnforce;
 
-        if (_p is null)
+        if (_p !is null)
         {
-            _p = cast(Impl*) enforce(malloc(Impl.sizeof), "Out of memory");
-        }
-        else if (_p.refs == 1)
-        {
-            closeHandles();
-        }
-        else
-        {
-            _p.refs--;
-            _p = cast(Impl*) enforce(malloc(Impl.sizeof), "Out of memory");
+            detach();
         }
 
+        _p = cast(Impl*) enforce(malloc(Impl.sizeof), "Out of memory");
         FILE* handle;
         version (Posix)
         {
@@ -561,7 +574,7 @@ Throws: $(D ErrnoException) in case of error.
 
     version (MICROSOFT_STDIO)
     {
-        private void setAppendWin(in char[] stdioOpenmode) @safe
+        private void setAppendWin(scope const(char)[] stdioOpenmode) @safe
         {
             bool append, update;
             foreach (c; stdioOpenmode)
@@ -586,9 +599,9 @@ function.
 Note: Calling `reopen` with a `null` `name` is not implemented
 in all C runtimes.
 
-Throws: $(D ErrnoException) in case of error.
+Throws: `ErrnoException` in case of error.
  */
-    void reopen(string name, in char[] stdioOpenmode = "rb") @trusted
+    void reopen(string name, scope const(char)[] stdioOpenmode = "rb") @trusted
     {
         import std.conv : text;
         import std.exception : enforce, errnoEnforce;
@@ -660,26 +673,26 @@ Detaches from the current file (throwing on failure), and then runs a command
 by calling the C standard library function $(HTTP
 opengroup.org/onlinepubs/007908799/xsh/_popen.html, _popen).
 
-Throws: $(D ErrnoException) in case of error.
+Throws: `ErrnoException` in case of error.
  */
-    version(Posix) void popen(string command, in char[] stdioOpenmode = "r") @safe
+    version(Posix) void popen(string command, scope const(char)[] stdioOpenmode = "r") @safe
     {
         resetFile(command, stdioOpenmode ,true);
     }
 
 /**
-First calls $(D detach) (throwing on failure), and then attempts to
-associate the given file descriptor with the $(D File). The mode must
+First calls `detach` (throwing on failure), and then attempts to
+associate the given file descriptor with the `File`. The mode must
 be compatible with the mode of the file descriptor.
 
-Throws: $(D ErrnoException) in case of error.
+Throws: `ErrnoException` in case of error.
  */
-    void fdopen(int fd, in char[] stdioOpenmode = "rb") @safe
+    void fdopen(int fd, scope const(char)[] stdioOpenmode = "rb") @safe
     {
         fdopen(fd, stdioOpenmode, null);
     }
 
-    package void fdopen(int fd, in char[] stdioOpenmode, string name) @trusted
+    package void fdopen(int fd, scope const(char)[] stdioOpenmode, string name) @trusted
     {
         import std.exception : errnoEnforce;
         import std.internal.cstring : tempCString;
@@ -722,17 +735,17 @@ Throws: $(D ErrnoException) in case of error.
     version(StdDdoc) { version(Windows) {} else alias HANDLE = int; }
 
 /**
-First calls $(D detach) (throwing on failure), and then attempts to
-associate the given Windows $(D HANDLE) with the $(D File). The mode must
+First calls `detach` (throwing on failure), and then attempts to
+associate the given Windows `HANDLE` with the `File`. The mode must
 be compatible with the access attributes of the handle. Windows only.
 
-Throws: $(D ErrnoException) in case of error.
+Throws: `ErrnoException` in case of error.
 */
     version(StdDdoc)
-    void windowsHandleOpen(HANDLE handle, in char[] stdioOpenmode);
+    void windowsHandleOpen(HANDLE handle, scope const(char)[] stdioOpenmode);
 
     version(Windows)
-    void windowsHandleOpen(HANDLE handle, in char[] stdioOpenmode)
+    void windowsHandleOpen(HANDLE handle, scope const(char)[] stdioOpenmode)
     {
         import core.stdc.stdint : intptr_t;
         import std.exception : errnoEnforce;
@@ -765,17 +778,17 @@ Throws: $(D ErrnoException) in case of error.
     }
 
 
-/** Returns $(D true) if the file is opened. */
+/** Returns `true` if the file is opened. */
     @property bool isOpen() const @safe pure nothrow
     {
         return _p !is null && _p.handle;
     }
 
 /**
-Returns $(D true) if the file is at end (see $(HTTP
+Returns `true` if the file is at end (see $(HTTP
 cplusplus.com/reference/clibrary/cstdio/feof.html, feof)).
 
-Throws: $(D Exception) if the file is not opened.
+Throws: `Exception` if the file is not opened.
  */
     @property bool eof() const @trusted pure
     {
@@ -786,7 +799,7 @@ Throws: $(D Exception) if the file is not opened.
     }
 
 /** Returns the name of the last opened file, if any.
-If a $(D File) was created with $(LREF tmpfile) and $(LREF wrapFile)
+If a `File` was created with $(LREF tmpfile) and $(LREF wrapFile)
 it has no name.*/
     @property string name() const @safe pure nothrow
     {
@@ -794,7 +807,7 @@ it has no name.*/
     }
 
 /**
-If the file is not opened, returns $(D true). Otherwise, returns
+If the file is not opened, returns `true`. Otherwise, returns
 $(HTTP cplusplus.com/reference/clibrary/cstdio/ferror.html, ferror) for
 the file handle.
  */
@@ -816,20 +829,21 @@ the file handle.
     }
 
 /**
-Detaches from the underlying file. If the sole owner, calls $(D close).
+Detaches from the underlying file. If the sole owner, calls `close`.
 
-Throws: $(D ErrnoException) on failure if closing the file.
+Throws: `ErrnoException` on failure if closing the file.
   */
-    void detach() @safe
+    void detach() @trusted
     {
+        import core.stdc.stdlib : free;
+
         if (!_p) return;
-        if (_p.refs == 1)
-            close();
-        else
+        scope(exit) _p = null;
+
+        if (atomicOp!"-="(_p.refs, 1) == 0)
         {
-            assert(_p.refs);
-            --_p.refs;
-            _p = null;
+            scope(exit) free(_p);
+            closeHandles();
         }
     }
 
@@ -853,11 +867,11 @@ If the file was unopened, succeeds vacuously. Otherwise closes the
 file (by calling $(HTTP
 cplusplus.com/reference/clibrary/cstdio/fclose.html, fclose)),
 throwing on error. Even if an exception is thrown, afterwards the $(D
-File) object is empty. This is different from $(D detach) in that it
-always closes the file; consequently, all other $(D File) objects
+File) object is empty. This is different from `detach` in that it
+always closes the file; consequently, all other `File` objects
 referring to the same handle will see a closed file henceforth.
 
-Throws: $(D ErrnoException) on error.
+Throws: `ErrnoException` on error.
  */
     void close() @trusted
     {
@@ -867,8 +881,7 @@ Throws: $(D ErrnoException) on error.
         if (!_p) return; // succeed vacuously
         scope(exit)
         {
-            assert(_p.refs);
-            if (!--_p.refs)
+            if (atomicOp!"-="(_p.refs, 1) == 0)
                 free(_p);
             _p = null; // start a new life
         }
@@ -890,12 +903,12 @@ _clearerr) for the file handle.
     }
 
 /**
-Flushes the C $(D FILE) buffers.
+Flushes the C `FILE` buffers.
 
 Calls $(HTTP cplusplus.com/reference/clibrary/cstdio/_fflush.html, _fflush)
 for the file handle.
 
-Throws: $(D Exception) if the file is not opened or if the call to $(D fflush) fails.
+Throws: `Exception` if the file is not opened or if the call to `fflush` fails.
  */
     void flush() @trusted
     {
@@ -926,15 +939,15 @@ Throws: $(D Exception) if the file is not opened or if the call to $(D fflush) f
 
 /**
 Forces any data buffered by the OS to be written to disk.
-Call $(LREF flush) before calling this function to flush the C $(D FILE) buffers first.
+Call $(LREF flush) before calling this function to flush the C `FILE` buffers first.
 
 This function calls
 $(HTTP msdn.microsoft.com/en-us/library/windows/desktop/aa364439%28v=vs.85%29.aspx,
-$(D FlushFileBuffers)) on Windows and
+`FlushFileBuffers`) on Windows and
 $(HTTP pubs.opengroup.org/onlinepubs/7908799/xsh/fsync.html,
-$(D fsync)) on POSIX for the file handle.
+`fsync`) on POSIX for the file handle.
 
-Throws: $(D Exception) if the file is not opened or if the OS call fails.
+Throws: `Exception` if the file is not opened or if the OS call fails.
  */
     void sync() @trusted
     {
@@ -960,14 +973,14 @@ Calls $(HTTP cplusplus.com/reference/clibrary/cstdio/fread.html, fread) for the
 file handle. The number of items to read and the size of
 each item is inferred from the size and type of the input array, respectively.
 
-Returns: The slice of $(D buffer) containing the data that was actually read.
-This will be shorter than $(D buffer) if EOF was reached before the buffer
+Returns: The slice of `buffer` containing the data that was actually read.
+This will be shorter than `buffer` if EOF was reached before the buffer
 could be filled.
 
-Throws: $(D Exception) if $(D buffer) is empty.
-        $(D ErrnoException) if the file is not opened or the call to $(D fread) fails.
+Throws: `Exception` if `buffer` is empty.
+        `ErrnoException` if the file is not opened or the call to `fread` fails.
 
-$(D rawRead) always reads in binary mode on Windows.
+`rawRead` always reads in binary mode on Windows.
  */
     T[] rawRead(T)(T[] buffer)
     {
@@ -1021,9 +1034,9 @@ handle. The number of items to write and the size of each
 item is inferred from the size and type of the input array, respectively. An
 error is thrown if the buffer could not be written in its entirety.
 
-$(D rawWrite) always writes in binary mode on Windows.
+`rawWrite` always writes in binary mode on Windows.
 
-Throws: $(D ErrnoException) if the file is not opened or if the call to $(D fwrite) fails.
+Throws: `ErrnoException` if the file is not opened or if the call to `fwrite` fails.
  */
     void rawWrite(T)(in T[] buffer)
     {
@@ -1073,8 +1086,8 @@ Throws: $(D ErrnoException) if the file is not opened or if the call to $(D fwri
 Calls $(HTTP cplusplus.com/reference/clibrary/cstdio/fseek.html, fseek)
 for the file handle.
 
-Throws: $(D Exception) if the file is not opened.
-        $(D ErrnoException) if the call to $(D fseek) fails.
+Throws: `Exception` if the file is not opened.
+        `ErrnoException` if the call to `fseek` fails.
  */
     void seek(long offset, int origin = SEEK_SET) @trusted
     {
@@ -1136,8 +1149,8 @@ Throws: $(D Exception) if the file is not opened.
 Calls $(HTTP cplusplus.com/reference/clibrary/cstdio/ftell.html, ftell) for the
 managed file handle.
 
-Throws: $(D Exception) if the file is not opened.
-        $(D ErrnoException) if the call to $(D ftell) fails.
+Throws: `Exception` if the file is not opened.
+        `ErrnoException` if the call to `ftell` fails.
  */
     @property ulong tell() const @trusted
     {
@@ -1181,7 +1194,7 @@ Throws: $(D Exception) if the file is not opened.
 Calls $(HTTP cplusplus.com/reference/clibrary/cstdio/_rewind.html, _rewind)
 for the file handle.
 
-Throws: $(D Exception) if the file is not opened.
+Throws: `Exception` if the file is not opened.
  */
     void rewind() @safe
     {
@@ -1195,8 +1208,8 @@ Throws: $(D Exception) if the file is not opened.
 Calls $(HTTP cplusplus.com/reference/clibrary/cstdio/_setvbuf.html, _setvbuf) for
 the file handle.
 
-Throws: $(D Exception) if the file is not opened.
-        $(D ErrnoException) if the call to $(D setvbuf) fails.
+Throws: `Exception` if the file is not opened.
+        `ErrnoException` if the call to `setvbuf` fails.
  */
     void setvbuf(size_t size, int mode = _IOFBF) @trusted
     {
@@ -1211,8 +1224,8 @@ Throws: $(D Exception) if the file is not opened.
 Calls $(HTTP cplusplus.com/reference/clibrary/cstdio/_setvbuf.html,
 _setvbuf) for the file handle.
 
-Throws: $(D Exception) if the file is not opened.
-        $(D ErrnoException) if the call to $(D setvbuf) fails.
+Throws: `Exception` if the file is not opened.
+        `ErrnoException` if the call to `setvbuf` fails.
 */
     void setvbuf(void[] buf, int mode = _IOFBF) @trusted
     {
@@ -1276,14 +1289,14 @@ Throws: $(D Exception) if the file is not opened.
 /**
 Locks the specified file segment. If the file segment is already locked
 by another process, waits until the existing lock is released.
-If both $(D start) and $(D length) are zero, the entire file is locked.
+If both `start` and `length` are zero, the entire file is locked.
 
-Locks created using $(D lock) and $(D tryLock) have the following properties:
+Locks created using `lock` and `tryLock` have the following properties:
 $(UL
  $(LI All locks are automatically released when the process terminates.)
  $(LI Locks are not inherited by child processes.)
  $(LI Closing a file will release all locks associated with the file. On POSIX,
-      even locks acquired via a different $(D File) will be released as well.)
+      even locks acquired via a different `File` will be released as well.)
  $(LI Not all NFS implementations correctly implement file locking.)
 )
  */
@@ -1317,8 +1330,8 @@ $(UL
 
 /**
 Attempts to lock the specified file segment.
-If both $(D start) and $(D length) are zero, the entire file is locked.
-Returns: $(D true) if the lock was successful, and $(D false) if the
+If both `start` and `length` are zero, the entire file is locked.
+Returns: `true` if the lock was successful, and `false` if the
 specified file segment was already locked.
  */
     bool tryLock(LockType lockType = LockType.readWrite,
@@ -1465,8 +1478,8 @@ Removes the lock over the specified file segment.
 /**
 Writes its arguments in text format to the file.
 
-Throws: $(D Exception) if the file is not opened.
-        $(D ErrnoException) on an error writing to the file.
+Throws: `Exception` if the file is not opened.
+        `ErrnoException` on an error writing to the file.
 */
     void write(S...)(S args)
     {
@@ -1512,8 +1525,8 @@ Throws: $(D Exception) if the file is not opened.
 /**
 Writes its arguments in text format to the file, followed by a newline.
 
-Throws: $(D Exception) if the file is not opened.
-        $(D ErrnoException) on an error writing to the file.
+Throws: `Exception` if the file is not opened.
+        `ErrnoException` on an error writing to the file.
 */
     void writeln(S...)(S args)
     {
@@ -1525,13 +1538,13 @@ Writes its arguments in text format to the file, according to the
 format string fmt.
 
 Params:
-fmt = The $(LINK2 std_format.html#format-string, format string).
+fmt = The $(REF_ALTTEXT format string, formattedWrite, std, _format).
 When passed as a compile-time argument, the string will be statically checked
 against the argument types passed.
 args = Items to write.
 
-Throws: $(D Exception) if the file is not opened.
-        $(D ErrnoException) on an error writing to the file.
+Throws: `Exception` if the file is not opened.
+        `ErrnoException` on an error writing to the file.
 */
     void writef(alias fmt, A...)(A args)
     if (isSomeString!(typeof(fmt)))
@@ -1576,12 +1589,12 @@ Throws: $(D Exception) if the file is not opened.
 Read line from the file handle and return it as a specified type.
 
 This version manages its own read buffer, which means one memory allocation per call. If you are not
-retaining a reference to the read data, consider the $(D File.readln(buf)) version, which may offer
+retaining a reference to the read data, consider the `File.readln(buf)` version, which may offer
 better performance as it can reuse its read buffer.
 
 Params:
-    S = Template parameter; the type of the allocated buffer, and the type returned. Defaults to $(D string).
-    terminator = Line terminator (by default, $(D '\n')).
+    S = Template parameter; the type of the allocated buffer, and the type returned. Defaults to `string`.
+    terminator = Line terminator (by default, `'\n'`).
 
 Note:
     String terminators are not supported due to ambiguity with readln(buf) below.
@@ -1590,7 +1603,7 @@ Returns:
     The line that was read, including the line terminator character.
 
 Throws:
-    $(D StdioException) on I/O error, or $(D UnicodeException) on Unicode conversion error.
+    `StdioException` on I/O error, or `UnicodeException` on Unicode conversion error.
 
 Example:
 ---
@@ -1622,8 +1635,8 @@ void main()
         auto deleteme = testFilename();
         std.file.write(deleteme, "hello\nworld\n");
         scope(exit) std.file.remove(deleteme);
-        foreach (String; AliasSeq!(string, char[], wstring, wchar[], dstring, dchar[]))
-        {
+        static foreach (String; AliasSeq!(string, char[], wstring, wchar[], dstring, dchar[]))
+        {{
             auto witness = [ "hello\n", "world\n" ];
             auto f = File(deleteme);
             uint i = 0;
@@ -1634,7 +1647,7 @@ void main()
                 assert(equal(buf, witness[i++]));
             }
             assert(i == witness.length);
-        }
+        }}
     }
 
     @system unittest
@@ -1646,17 +1659,17 @@ void main()
         std.file.write(deleteme, "cześć \U0002000D");
         scope(exit) std.file.remove(deleteme);
         uint[] lengths = [12,8,7];
-        foreach (uint i, C; Tuple!(char, wchar, dchar).Types)
-        {
+        static foreach (uint i, C; Tuple!(char, wchar, dchar).Types)
+        {{
             immutable(C)[] witness = "cześć \U0002000D";
             auto buf = File(deleteme).readln!(immutable(C)[])();
             assert(buf.length == lengths[i]);
             assert(buf == witness);
-        }
+        }}
     }
 
 /**
-Read line from the file handle and write it to $(D buf[]), including
+Read line from the file handle and write it to `buf[]`, including
 terminating character.
 
 This can be faster than $(D line = File.readln()) because you can reuse
@@ -1666,14 +1679,14 @@ must copy the previous contents if you wish to retain them.
 Params:
 buf = Buffer used to store the resulting line data. buf is
 resized as necessary.
-terminator = Line terminator (by default, $(D '\n')). Use
+terminator = Line terminator (by default, `'\n'`). Use
 $(REF newline, std,ascii) for portability (unless the file was opened in
 text mode).
 
 Returns:
 0 for end of file, otherwise number of characters read
 
-Throws: $(D StdioException) on I/O error, or $(D UnicodeException) on Unicode
+Throws: `StdioException` on I/O error, or `UnicodeException` on Unicode
 conversion error.
 
 Example:
@@ -1700,13 +1713,13 @@ void main()
 ---
 
 This method can be more efficient than the one in the previous example
-because $(D stdin.readln(buf)) reuses (if possible) memory allocated
-for $(D buf), whereas $(D line = stdin.readln()) makes a new memory allocation
+because `stdin.readln(buf)` reuses (if possible) memory allocated
+for `buf`, whereas $(D line = stdin.readln()) makes a new memory allocation
 for every line.
 
-For even better performance you can help $(D readln) by passing in a
+For even better performance you can help `readln` by passing in a
 large buffer to avoid memory reallocations. This can be done by reusing the
-largest buffer returned by $(D readln):
+largest buffer returned by `readln`:
 
 Example:
 ---
@@ -1862,7 +1875,7 @@ is recommended if you want to process a complete file.
     /**
      * Reads formatted _data from the file using $(REF formattedRead, std,_format).
      * Params:
-     * format = The $(LINK2 std_format.html#_format-string, _format string).
+     * format = The $(REF_ALTTEXT format string, formattedWrite, std _format).
      * When passed as a compile-time argument, the string will be statically checked
      * against the argument types passed.
      * data = Items to be read.
@@ -1900,7 +1913,7 @@ $(CONSOLE
     }
 
     /// ditto
-    uint readf(Data...)(in char[] format, auto ref Data data)
+    uint readf(Data...)(scope const(char)[] format, auto ref Data data)
     {
         import std.format : formattedRead;
 
@@ -2004,7 +2017,7 @@ $(CONSOLE
     }
 
 /**
-Unsafe function that wraps an existing $(D FILE*). The resulting $(D
+Unsafe function that wraps an existing `FILE*`. The resulting $(D
 File) never takes the initiative in closing the file.
 Note that the created file has no $(LREF name)*/
     /*private*/ static File wrapFile(FILE* f) @safe
@@ -2016,7 +2029,7 @@ Note that the created file has no $(LREF name)*/
     }
 
 /**
-Returns the $(D FILE*) corresponding to this object.
+Returns the `FILE*` corresponding to this object.
  */
     FILE* getFP() @safe pure
     {
@@ -2045,7 +2058,7 @@ Returns the file number corresponding to this object.
     }
 
 /**
-Returns the underlying operating system $(D HANDLE) (Windows only).
+Returns the underlying operating system `HANDLE` (Windows only).
 */
     version(StdDdoc)
     @property HANDLE windowsHandle();
@@ -2066,7 +2079,7 @@ Range that reads one line at a time.  Returned by $(LREF byLine).
 
 Allows to directly use range operations on lines of a file.
 */
-    struct ByLine(Char, Terminator)
+    private struct ByLineImpl(Char, Terminator)
     {
     private:
         import std.typecons : RefCounted, RefCountedAutoInitialize;
@@ -2169,25 +2182,33 @@ Allows to directly use range operations on lines of a file.
         }
     }
 
-/**
-Returns an input range set up to read from the file handle one line
-at a time.
+    // @@@DEPRECATED_2019-01@@@
+    deprecated("Use .byLine")
+    struct ByLine(Char, Terminator)
+    {
+        ByLineImpl!(Char, Terminator) payload;
+        alias payload this;
+    }
 
-The element type for the range will be $(D Char[]). Range primitives
-may throw $(D StdioException) on I/O error.
+/**
+Returns an $(REF_ALTTEXT input range, isInputRange, std,range,primitives)
+set up to read from the file handle one line at a time.
+
+The element type for the range will be `Char[]`. Range primitives
+may throw `StdioException` on I/O error.
 
 Note:
-Each $(D front) will not persist after $(D
+Each `front` will not persist after $(D
 popFront) is called, so the caller must copy its contents (e.g. by
-calling $(D to!string)) when retention is needed. If the caller needs
+calling `to!string`) when retention is needed. If the caller needs
 to retain a copy of every line, use the $(LREF byLineCopy) function
 instead.
 
 Params:
-Char = Character type for each line, defaulting to $(D char).
-keepTerminator = Use $(D Yes.keepTerminator) to include the
+Char = Character type for each line, defaulting to `char`.
+keepTerminator = Use `Yes.keepTerminator` to include the
 terminator at the end of each line.
-terminator = Line separator ($(D '\n') by default). Use
+terminator = Line separator (`'\n'` by default). Use
 $(REF newline, std,ascii) for portability (unless the file was opened in
 text mode).
 
@@ -2226,7 +2247,7 @@ void main()
 }
 ----
 Notice that neither example accesses the line data returned by
-$(D front) after the corresponding $(D popFront) call is made (because
+`front` after the corresponding `popFront` call is made (because
 the contents may well have changed).
 */
     auto byLine(Terminator = char, Char = char)
@@ -2234,7 +2255,7 @@ the contents may well have changed).
             Terminator terminator = '\n')
     if (isScalarType!Terminator)
     {
-        return ByLine!(Char, Terminator)(this, keepTerminator, terminator);
+        return ByLineImpl!(Char, Terminator)(this, keepTerminator, terminator);
     }
 
 /// ditto
@@ -2242,7 +2263,7 @@ the contents may well have changed).
             (KeepTerminator keepTerminator, Terminator terminator)
     if (is(Unqual!(ElementEncodingType!Terminator) == Char))
     {
-        return ByLine!(Char, Terminator)(this, keepTerminator, terminator);
+        return ByLineImpl!(Char, Terminator)(this, keepTerminator, terminator);
     }
 
     @system unittest
@@ -2253,13 +2274,13 @@ the contents may well have changed).
         scope(success) std.file.remove(deleteme);
 
         import std.meta : AliasSeq;
-        foreach (T; AliasSeq!(char, wchar, dchar))
-        {
+        static foreach (T; AliasSeq!(char, wchar, dchar))
+        {{
             auto blc = File(deleteme).byLine!(T, T);
             assert(blc.front == "hi");
             // check front is cached
             assert(blc.front is blc.front);
-        }
+        }}
     }
 
     private struct ByLineCopy(Char, Terminator)
@@ -2299,14 +2320,14 @@ the contents may well have changed).
 
     private struct ByLineCopyImpl(Char, Terminator)
     {
-        ByLine!(Unqual!Char, Terminator).Impl impl;
+        ByLineImpl!(Unqual!Char, Terminator).Impl impl;
         bool gotFront;
         Char[] line;
 
     public:
         this(File f, KeepTerminator kt, Terminator terminator)
         {
-            impl = ByLine!(Unqual!Char, Terminator).Impl(f, kt, terminator);
+            impl = ByLineImpl!(Unqual!Char, Terminator).Impl(f, kt, terminator);
         }
 
         @property bool empty()
@@ -2332,21 +2353,22 @@ the contents may well have changed).
     }
 
 /**
-Returns an input range set up to read from the file handle one line
-at a time. Each line will be newly allocated. $(D front) will cache
+Returns an $(REF_ALTTEXT input range, isInputRange, std,range,primitives)
+set up to read from the file handle one line
+at a time. Each line will be newly allocated. `front` will cache
 its value to allow repeated calls without unnecessary allocations.
 
 Note: Due to caching byLineCopy can be more memory-efficient than
-$(D File.byLine.map!idup).
+`File.byLine.map!idup`.
 
-The element type for the range will be $(D Char[]). Range
-primitives may throw $(D StdioException) on I/O error.
+The element type for the range will be `Char[]`. Range
+primitives may throw `StdioException` on I/O error.
 
 Params:
 Char = Character type for each line, defaulting to $(D immutable char).
-keepTerminator = Use $(D Yes.keepTerminator) to include the
+keepTerminator = Use `Yes.keepTerminator` to include the
 terminator at the end of each line.
-terminator = Line separator ($(D '\n') by default). Use
+terminator = Line separator (`'\n'` by default). Use
 $(REF newline, std,ascii) for portability (unless the file was opened in
 text mode).
 
@@ -2501,7 +2523,7 @@ $(REF readText, std,file)
 
         // bug 9599
         file.rewind();
-        File.ByLine!(char, char) fbl = file.byLine();
+        File.ByLineImpl!(char, char) fbl = file.byLine();
         auto fbl2 = fbl;
         assert(fbl.front == "1");
         assert(fbl.front is fbl2.front);
@@ -2535,10 +2557,10 @@ $(REF readText, std,file)
     }
 
     /**
-    Creates an input range set up to parse one line at a time from the file
-    into a tuple.
+    Creates an $(REF_ALTTEXT input range, isInputRange, std,range,primitives)
+    set up to parse one line at a time from the file into a tuple.
 
-    Range primitives may throw $(D StdioException) on I/O error.
+    Range primitives may throw `StdioException` on I/O error.
 
     Params:
         format = tuple record $(REF_ALTTEXT _format, formattedRead, std, _format)
@@ -2553,9 +2575,9 @@ $(REF readText, std,file)
     */
     template byRecord(Fields...)
     {
-        ByRecord!(Fields) byRecord(string format)
+        auto byRecord(string format)
         {
-            return typeof(return)(this, format);
+            return ByRecordImpl!(Fields)(this, format);
         }
     }
 
@@ -2586,7 +2608,7 @@ $(REF readText, std,file)
     /*
      * Range that reads a chunk at a time.
      */
-    struct ByChunk
+    private struct ByChunkImpl
     {
     private:
         File    file_;
@@ -2614,7 +2636,7 @@ $(REF readText, std,file)
             prime();
         }
 
-        // $(D ByChunk)'s input range primitive operations.
+        // `ByChunk`'s input range primitive operations.
         @property nothrow
         bool empty() const
         {
@@ -2647,12 +2669,20 @@ $(REF readText, std,file)
         }
     }
 
-/**
-Returns an input range set up to read from the file handle a chunk at a
-time.
+    // @@@DEPRECATED_2019-01@@@
+    deprecated("Use .byChunk")
+    struct ByChunk
+    {
+        ByChunkImpl payload;
+        alias payload this;
+    }
 
-The element type for the range will be $(D ubyte[]). Range primitives
-may throw $(D StdioException) on I/O error.
+/**
+Returns an $(REF_ALTTEXT input range, isInputRange, std,range,primitives)
+set up to read from the file handle a chunk at a time.
+
+The element type for the range will be `ubyte[]`. Range primitives
+may throw `StdioException` on I/O error.
 
 Example:
 ---------
@@ -2667,7 +2697,7 @@ void main()
 ---------
 
 The parameter may be a number (as shown in the example above) dictating the
-size of each chunk. Alternatively, $(D byChunk) accepts a
+size of each chunk. Alternatively, `byChunk` accepts a
 user-provided buffer that it uses directly.
 
 Example:
@@ -2683,14 +2713,14 @@ void main()
 ---------
 
 In either case, the content of the buffer is reused across calls. That means
-$(D front) will not persist after $(D popFront) is called, so if retention is
-needed, the caller must copy its contents (e.g. by calling $(D buffer.dup)).
+`front` will not persist after `popFront` is called, so if retention is
+needed, the caller must copy its contents (e.g. by calling `buffer.dup`).
 
-In the  example above, $(D buffer.length) is 4096 for all iterations, except
-for the last one, in which case $(D buffer.length) may be less than 4096 (but
+In the  example above, `buffer.length` is 4096 for all iterations, except
+for the last one, in which case `buffer.length` may be less than 4096 (but
 always greater than zero).
 
-With the mentioned limitations, $(D byChunk) works with any algorithm
+With the mentioned limitations, `byChunk` works with any algorithm
 compatible with input ranges.
 
 Example:
@@ -2717,21 +2747,21 @@ void main()
 }
 ---
 
-Returns: A call to $(D byChunk) returns a range initialized with the $(D File)
+Returns: A call to `byChunk` returns a range initialized with the `File`
 object and the appropriate buffer.
 
 Throws: If the user-provided size is zero or the user-provided buffer
-is empty, throws an $(D Exception). In case of an I/O error throws
-$(D StdioException).
+is empty, throws an `Exception`. In case of an I/O error throws
+`StdioException`.
  */
     auto byChunk(size_t chunkSize)
     {
-        return ByChunk(this, chunkSize);
+        return ByChunkImpl(this, chunkSize);
     }
 /// Ditto
-    ByChunk byChunk(ubyte[] buffer)
+    auto byChunk(ubyte[] buffer)
     {
-        return ByChunk(this, buffer);
+        return ByChunkImpl(this, buffer);
     }
 
     @system unittest
@@ -2786,7 +2816,7 @@ $(D StdioException).
 
     // Note: This was documented until 2013/08
 /*
-$(D Range) that locks the file and allows fast writing to it.
+`Range` that locks the file and allows fast writing to it.
  */
     struct LockingTextWriter
     {
@@ -2801,6 +2831,15 @@ $(D Range) that locks the file and allows fast writing to it.
 
         // the file's orientation (byte- or wide-oriented)
         int orientation_;
+
+        // A buffer for when we need to transcode.
+        wchar highSurrogate = '\0'; // '\0' indicates empty
+        void highSurrogateShouldBeEmpty() @safe
+        {
+            import std.utf : UTFException;
+            if (highSurrogate != '\0')
+                throw new UTFException("unpaired surrogate UTF-16 value");
+        }
     public:
 
         this(ref File f) @trusted
@@ -2821,6 +2860,10 @@ $(D Range) that locks the file and allows fast writing to it.
             {
                 if (p.handle) FUNLOCK(p.handle);
             }
+            file_ = File.init;
+                /* Destroy file_ before possibly throwing. Else it wouldn't be
+                destroyed, and its reference count would be wrong. */
+            highSurrogateShouldBeEmpty();
         }
 
         this(this) @trusted
@@ -2832,7 +2875,7 @@ $(D Range) that locks the file and allows fast writing to it.
         }
 
         /// Range primitive implementations.
-        void put(A)(A writeme)
+        void put(A)(scope A writeme)
             if ((isSomeChar!(Unqual!(ElementType!A)) ||
                   is(ElementType!A : const(ubyte))) &&
                 isInputRange!A &&
@@ -2858,15 +2901,14 @@ $(D Range) that locks the file and allows fast writing to it.
             }
 
             // put each element in turn.
-            alias Elem = Unqual!(ElementType!A);
-            foreach (Elem c; writeme)
+            foreach (c; writeme)
             {
                 put(c);
             }
         }
 
         /// ditto
-        void put(C)(C c) @safe if (isSomeChar!C || is(C : const(ubyte)))
+        void put(C)(scope C c) @safe if (isSomeChar!C || is(C : const(ubyte)))
         {
             import std.traits : Parameters;
             static auto trustedFPUTC(int ch, _iobuf* h) @trusted
@@ -2881,25 +2923,39 @@ $(D Range) that locks the file and allows fast writing to it.
             static if (c.sizeof == 1)
             {
                 // simple char
+                highSurrogateShouldBeEmpty();
                 if (orientation_ <= 0) trustedFPUTC(c, handle_);
                 else trustedFPUTWC(c, handle_);
             }
             else static if (c.sizeof == 2)
             {
-                import std.utf : encode, UseReplacementDchar;
+                import std.utf : encode;
 
                 if (orientation_ <= 0)
                 {
                     if (c <= 0x7F)
                     {
+                        highSurrogateShouldBeEmpty();
                         trustedFPUTC(c, handle_);
                     }
-                    else
+                    else if (0xD800 <= c && c <= 0xDBFF) // high surrogate
                     {
-                        char[4] buf;
-                        immutable size = encode!(UseReplacementDchar.yes)(buf, c);
-                        foreach (i ; 0 .. size)
-                            trustedFPUTC(buf[i], handle_);
+                        highSurrogateShouldBeEmpty();
+                        highSurrogate = c;
+                    }
+                    else // standalone or low surrogate
+                    {
+                        dchar d = c;
+                        if (highSurrogate != '\0')
+                        {
+                            immutable wchar[2] rbuf = [highSurrogate, c];
+                            d = rbuf[].front;
+                            highSurrogate = 0;
+                        }
+                        char[4] wbuf;
+                        immutable size = encode(wbuf, d);
+                        foreach (i; 0 .. size)
+                            trustedFPUTC(wbuf[i], handle_);
                     }
                 }
                 else
@@ -2911,6 +2967,7 @@ $(D Range) that locks the file and allows fast writing to it.
             {
                 import std.utf : encode;
 
+                highSurrogateShouldBeEmpty();
                 if (orientation_ <= 0)
                 {
                     if (c <= 0x7F)
@@ -2959,10 +3016,24 @@ $(D Range) that locks the file and allows fast writing to it.
         }
     }
 
-/** Returns an output range that locks the file and allows fast writing to it.
-
-See $(LREF byChunk) for an example.
-*/
+    /**
+     * Output range which locks the file when created, and unlocks the file when it goes
+     * out of scope.
+     *
+     * Returns: An $(REF_ALTTEXT output range, isOutputRange, std, range, primitives)
+     * which accepts string types, `ubyte[]`, individual character types, and
+     * individual `ubyte`s.
+     *
+     * Note: Writing either arrays of `char`s or `ubyte`s is faster than
+     * writing each character individually from a range. For large amounts of data,
+     * writing the contents in chunks using an intermediary array can result
+     * in a speed increase.
+     *
+     * Throws: $(REF UTFException, std, utf) if the data given is a `char` range
+     * and it contains malformed UTF data.
+     *
+     * See_Also: $(LREF byChunk) for an example.
+     */
     auto lockingTextWriter() @safe
     {
         return LockingTextWriter(this);
@@ -3064,14 +3135,14 @@ See $(LREF byChunk) for an example.
             }
         }
 
-        void put(T)(auto ref in T value)
+        void put(T)(auto ref scope const T value)
         if (!hasIndirections!T &&
             !isInputRange!T)
         {
             rawWrite((&value)[0 .. 1]);
         }
 
-        void put(T)(in T[] array)
+        void put(T)(scope const(T)[] array)
         if (!hasIndirections!T &&
             !isInputRange!T)
         {
@@ -3379,6 +3450,51 @@ void main()
     assert(File(deleteme).readln() == "日本語日本語日本語日本語############日本語");
 }
 
+@safe unittest // wchar -> char
+{
+    static import std.file;
+    import std.exception : assertThrown;
+    import std.utf : UTFException;
+
+    auto deleteme = testFilename();
+    scope(exit) std.file.remove(deleteme);
+
+    {
+        auto writer = File(deleteme, "w").lockingTextWriter();
+        writer.put("\U0001F608"w);
+    }
+    assert(std.file.readText!string(deleteme) == "\U0001F608");
+
+    // Test invalid input: unpaired high surrogate
+    {
+        immutable wchar surr = "\U0001F608"w[0];
+        auto f = File(deleteme, "w");
+        assertThrown!UTFException(() {
+            auto writer = f.lockingTextWriter();
+            writer.put('x');
+            writer.put(surr);
+            assertThrown!UTFException(writer.put(char('y')));
+            assertThrown!UTFException(writer.put(wchar('y')));
+            assertThrown!UTFException(writer.put(dchar('y')));
+            assertThrown!UTFException(writer.put(surr));
+            // First `surr` is still unpaired at this point. `writer` gets
+            // destroyed now, and the destructor throws a UTFException for
+            // the unpaired surrogate.
+        } ());
+    }
+    assert(std.file.readText!string(deleteme) == "x");
+
+    // Test invalid input: unpaired low surrogate
+    {
+        immutable wchar surr = "\U0001F608"w[1];
+        auto writer = File(deleteme, "w").lockingTextWriter();
+        assertThrown!UTFException(writer.put(surr));
+        writer.put('y');
+        assertThrown!UTFException(writer.put(surr));
+    }
+    assert(std.file.readText!string(deleteme) == "y");
+}
+
 @safe unittest
 {
     import std.exception : collectException;
@@ -3386,7 +3502,25 @@ void main()
     assert(e && e.msg == "Attempting to write to closed File");
 }
 
-/// Used to specify the lock type for $(D File.lock) and $(D File.tryLock).
+version(StdStressTest)
+{
+    // issue 15768
+    @system unittest
+    {
+        import std.parallelism : parallel;
+        import std.range : iota;
+
+        auto deleteme = testFilename();
+        stderr = File(deleteme, "w");
+
+        foreach (t; 1_000_000.iota.parallel)
+        {
+            stderr.write("aaa");
+        }
+    }
+}
+
+/// Used to specify the lock type for `File.lock` and `File.tryLock`.
 enum LockType
 {
     /**
@@ -3557,7 +3691,7 @@ struct LockingTextReader
 }
 
 /**
- * Indicates whether $(D T) is a file handle, i.e. the type
+ * Indicates whether `T` is a file handle, i.e. the type
  * is implicitly convertable to $(LREF File) or a pointer to a
  * $(REF FILE, core,stdc,stdio).
  *
@@ -3586,15 +3720,12 @@ private @property File trustedStdout() @trusted
 }
 
 /***********************************
-For each argument $(D arg) in $(D args), format the argument (using
-$(REF to, std,conv)) and write the resulting
-string to $(D args[0]). A call without any arguments will fail to
-compile.
+Writes its arguments in text format to standard output (without a trailing newline).
 
 Params:
     args = the items to write to `stdout`
 
-Throws: In case of an I/O error, throws an $(D StdioException).
+Throws: In case of an I/O error, throws an `StdioException`.
 
 Example:
     Reads `stdin` and writes it to `stdout` with an argument
@@ -3646,7 +3777,7 @@ if (!is(T[0] : File))
  * Throws:
  *      In case of an I/O error, throws an $(LREF StdioException).
  * Example:
- *        Reads $(D stdin) and writes it to $(D stdout) with a argument
+ *        Reads `stdin` and writes it to `stdout` with a argument
  *        counter.
 ---
 import std.stdio;
@@ -3773,8 +3904,8 @@ void writeln(T...)(T args)
     scope(exit) { std.file.remove(deleteme); }
 
     enum EI : int    { A, B }
-    enum ED : double { A, B }
-    enum EC : char   { A, B }
+    enum ED : double { A = 0, B } // NOTE: explicit initialization to 0 required during Enum init deprecation cycle
+    enum EC : char   { A = 0, B } // NOTE: explicit initialization to 0 required during Enum init deprecation cycle
     enum ES : string { A = "aaa", B = "bbb" }
 
     f.writeln(EI.A);  // false, but A on 2.058
@@ -3815,7 +3946,7 @@ void writeln(T...)(T args)
 Writes formatted data to standard output (without a trailing newline).
 
 Params:
-fmt = The $(LINK2 std_format.html#format-string, format string).
+fmt = The $(REF_ALTTEXT format string, formattedWrite, std, _format).
 When passed as a compile-time argument, the string will be statically checked
 against the argument types passed.
 args = Items to write.
@@ -3826,7 +3957,7 @@ Note: In older versions of Phobos, it used to be possible to write:
 writef(stderr, "%s", "message");
 ------
 
-to print a message to $(D stderr). This syntax is no longer supported, and has
+to print a message to `stderr`. This syntax is no longer supported, and has
 been superceded by:
 
 ------
@@ -3926,9 +4057,9 @@ void writefln(Char, A...)(in Char[] fmt, A args)
 }
 
 /**
- * Reads formatted data from $(D stdin) using $(REF formattedRead, std,_format).
+ * Reads formatted data from `stdin` using $(REF formattedRead, std,_format).
  * Params:
- * format = The $(LINK2 std_format.html#_format-string, _format string).
+ * format = The $(REF_ALTTEXT format string, formattedWrite, std, _format).
  * When passed as a compile-time argument, the string will be statically checked
  * against the argument types passed.
  * args = Items to be read.
@@ -3964,7 +4095,7 @@ if (isSomeString!(typeof(format)))
 }
 
 /// ditto
-uint readf(A...)(in char[] format, auto ref A args)
+uint readf(A...)(scope const(char)[] format, auto ref A args)
 {
     return stdin.readf(format, args);
 }
@@ -3984,23 +4115,23 @@ uint readf(A...)(in char[] format, auto ref A args)
 }
 
 /**********************************
- * Read line from $(D stdin).
+ * Read line from `stdin`.
  *
  * This version manages its own read buffer, which means one memory allocation per call. If you are not
- * retaining a reference to the read data, consider the $(D readln(buf)) version, which may offer
+ * retaining a reference to the read data, consider the `readln(buf)` version, which may offer
  * better performance as it can reuse its read buffer.
  *
  * Returns:
  *        The line that was read, including the line terminator character.
  * Params:
- *        S = Template parameter; the type of the allocated buffer, and the type returned. Defaults to $(D string).
- *        terminator = Line terminator (by default, $(D '\n')).
+ *        S = Template parameter; the type of the allocated buffer, and the type returned. Defaults to `string`.
+ *        terminator = Line terminator (by default, `'\n'`).
  * Note:
  *        String terminators are not supported due to ambiguity with readln(buf) below.
  * Throws:
- *        $(D StdioException) on I/O error, or $(D UnicodeException) on Unicode conversion error.
+ *        `StdioException` on I/O error, or `UnicodeException` on Unicode conversion error.
  * Example:
- *        Reads $(D stdin) and writes it to $(D stdout).
+ *        Reads `stdin` and writes it to `stdout`.
 ---
 import std.stdio;
 
@@ -4019,22 +4150,22 @@ if (isSomeString!S)
 }
 
 /**********************************
- * Read line from $(D stdin) and write it to buf[], including terminating character.
+ * Read line from `stdin` and write it to buf[], including terminating character.
  *
  * This can be faster than $(D line = readln()) because you can reuse
  * the buffer for each call. Note that reusing the buffer means that you
  * must copy the previous contents if you wish to retain them.
  *
  * Returns:
- *        $(D size_t) 0 for end of file, otherwise number of characters read
+ *        `size_t` 0 for end of file, otherwise number of characters read
  * Params:
  *        buf = Buffer used to store the resulting line data. buf is resized as necessary.
- *        terminator = Line terminator (by default, $(D '\n')). Use $(REF newline, std,ascii)
+ *        terminator = Line terminator (by default, `'\n'`). Use $(REF newline, std,ascii)
  *        for portability (unless the file was opened in text mode).
  * Throws:
- *        $(D StdioException) on I/O error, or $(D UnicodeException) on Unicode conversion error.
+ *        `StdioException` on I/O error, or `UnicodeException` on Unicode conversion error.
  * Example:
- *        Reads $(D stdin) and writes it to $(D stdout).
+ *        Reads `stdin` and writes it to `stdout`.
 ---
 import std.stdio;
 
@@ -4070,24 +4201,24 @@ if (isSomeChar!C && is(Unqual!C == C) && !is(C == enum) &&
     {
         readln();
         readln('\t');
-        foreach (String; AliasSeq!(string, char[], wstring, wchar[], dstring, dchar[]))
+        static foreach (String; AliasSeq!(string, char[], wstring, wchar[], dstring, dchar[]))
         {
             readln!String();
             readln!String('\t');
         }
-        foreach (String; AliasSeq!(char[], wchar[], dchar[]))
-        {
+        static foreach (String; AliasSeq!(char[], wchar[], dchar[]))
+        {{
             String buf;
             readln(buf);
             readln(buf, '\t');
             readln(buf, "<br />");
-        }
+        }}
     }
 }
 
 /*
- * Convenience function that forwards to $(D core.sys.posix.stdio.fopen)
- * (to $(D _wfopen) on Windows)
+ * Convenience function that forwards to `core.sys.posix.stdio.fopen`
+ * (to `_wfopen` on Windows)
  * with appropriately-constructed C-style strings.
  */
 private FILE* fopen(R1, R2)(R1 name, R2 mode = "r")
@@ -4129,7 +4260,7 @@ if ((isInputRange!R1 && isSomeChar!(ElementEncodingType!R1) || isSomeString!R1) 
 version (Posix)
 {
     /***********************************
-     * Convenience function that forwards to $(D core.sys.posix.stdio.popen)
+     * Convenience function that forwards to `core.sys.posix.stdio.popen`
      * with appropriately-constructed C-style strings.
      */
     FILE* popen(R1, R2)(R1 name, R2 mode = "r") @trusted nothrow @nogc
@@ -4151,7 +4282,7 @@ version (Posix)
 }
 
 /*
- * Convenience function that forwards to $(D core.stdc.stdio.fwrite)
+ * Convenience function that forwards to `core.stdc.stdio.fwrite`
  */
 private auto trustedFwrite(T)(FILE* f, const T[] obj) @trusted
 {
@@ -4159,7 +4290,7 @@ private auto trustedFwrite(T)(FILE* f, const T[] obj) @trusted
 }
 
 /*
- * Convenience function that forwards to $(D core.stdc.stdio.fread)
+ * Convenience function that forwards to `core.stdc.stdio.fread`
  */
 private auto trustedFread(T)(FILE* f, T[] obj) @trusted
 {
@@ -4167,7 +4298,7 @@ private auto trustedFread(T)(FILE* f, T[] obj) @trusted
 }
 
 /**
- * Iterates through the lines of a file by using $(D foreach).
+ * Iterates through the lines of a file by using `foreach`.
  *
  * Example:
  *
@@ -4180,24 +4311,24 @@ void main()
   }
 }
 ---------
-The line terminator ($(D '\n') by default) is part of the string read (it
+The line terminator (`'\n'` by default) is part of the string read (it
 could be missing in the last line of the file). Several types are
-supported for $(D line), and the behavior of $(D lines)
+supported for `line`, and the behavior of `lines`
 changes accordingly:
 
-$(OL $(LI If $(D line) has type $(D string), $(D
-wstring), or $(D dstring), a new string of the respective type
-is allocated every read.) $(LI If $(D line) has type $(D
-char[]), $(D wchar[]), $(D dchar[]), the line's content
-will be reused (overwritten) across reads.) $(LI If $(D line)
-has type $(D immutable(ubyte)[]), the behavior is similar to
+$(OL $(LI If `line` has type `string`, $(D
+wstring), or `dstring`, a new string of the respective type
+is allocated every read.) $(LI If `line` has type $(D
+char[]), `wchar[]`, `dchar[]`, the line's content
+will be reused (overwritten) across reads.) $(LI If `line`
+has type `immutable(ubyte)[]`, the behavior is similar to
 case (1), except that no UTF checking is attempted upon input.) $(LI
-If $(D line) has type $(D ubyte[]), the behavior is
+If `line` has type `ubyte[]`, the behavior is
 similar to case (2), except that no UTF checking is attempted upon
 input.))
 
 In all cases, a two-symbols versions is also accepted, in which case
-the first symbol (of integral type, e.g. $(D ulong) or $(D
+the first symbol (of integral type, e.g. `ulong` or $(D
 uint)) tracks the zero-based number of the current line.
 
 Example:
@@ -4208,7 +4339,7 @@ Example:
   }
 ----
 
- In case of an I/O error, an $(D StdioException) is thrown.
+ In case of an I/O error, an `StdioException` is thrown.
 
 See_Also:
 $(LREF byLine)
@@ -4223,7 +4354,7 @@ struct lines
     Constructor.
     Params:
     f = File to read lines from.
-    terminator = Line separator ($(D '\n') by default).
+    terminator = Line separator (`'\n'` by default).
     */
     this(File f, dchar terminator = '\n')
     {
@@ -4417,7 +4548,7 @@ struct lines
 
     }
 
-    foreach (T; AliasSeq!(ubyte[]))
+    static foreach (T; AliasSeq!(ubyte[]))
     {
         // test looping with a file with three lines, last without a newline
         // using a counter too this time
@@ -4437,7 +4568,7 @@ struct lines
 }
 
 /**
-Iterates through a file a chunk at a time by using $(D foreach).
+Iterates through a file a chunk at a time by using `foreach`.
 
 Example:
 
@@ -4451,12 +4582,12 @@ void main()
 }
 ---------
 
-The content of $(D buffer) is reused across calls. In the
- example above, $(D buffer.length) is 4096 for all iterations,
- except for the last one, in which case $(D buffer.length) may
+The content of `buffer` is reused across calls. In the
+ example above, `buffer.length` is 4096 for all iterations,
+ except for the last one, in which case `buffer.length` may
  be less than 4096 (but always greater than zero).
 
- In case of an I/O error, an $(D StdioException) is thrown.
+ In case of an I/O error, an `StdioException` is thrown.
 */
 auto chunks(File f, size_t size)
 {
@@ -4552,7 +4683,7 @@ private struct ChunksImpl
 Writes an array or range to a file.
 Shorthand for $(D data.copy(File(fileName, "wb").lockingBinaryWriter)).
 Similar to $(REF write, std,file), strings are written as-is,
-rather than encoded according to the $(D File)'s $(HTTP
+rather than encoded according to the `File`'s $(HTTP
 en.cppreference.com/w/c/io#Narrow_and_wide_orientation,
 orientation).
 */
@@ -4596,7 +4727,7 @@ Initialize with a message and an error code.
                      : (message ? message ~ " (" ~ sysmsg ~ ")" : sysmsg));
     }
 
-/** Convenience functions that throw an $(D StdioException). */
+/** Convenience functions that throw an `StdioException`. */
     static void opCall(string msg)
     {
         throw new StdioException(msg);
@@ -4650,10 +4781,19 @@ enum StdFileHandle: string
 }
 
 /** The standard input stream.
-    Bugs:
-        Due to $(LINK2 https://issues.dlang.org/show_bug.cgi?id=15768, bug 15768),
-        it is thread un-safe to reassign `stdin` to a different `File` instance
-        than the default.
+
+    Returns:
+        stdin as a $(LREF File).
+
+    Note:
+        The returned $(LREF File) wraps $(REF stdin,core,stdio), and
+        is therefore thread global. Reassigning `stdin` to a different
+        `File` must be done in a single-threaded or locked context in
+        order to avoid race conditions.
+
+        All reading from `stdin` automatically locks the file globally,
+        and will cause all other threads calling `read` to wait until
+        the lock is released.
 */
 alias stdin = makeGlobal!(StdFileHandle.stdin);
 
@@ -4666,7 +4806,8 @@ alias stdin = makeGlobal!(StdFileHandle.stdin);
     import std.array : array;
     import std.typecons : Yes;
 
-    void main() {
+    void main()
+    {
         stdin                       // read from stdin
         .byLineCopy(Yes.keepTerminator) // copying each line
         .array()                    // convert to array of lines
@@ -4678,21 +4819,93 @@ alias stdin = makeGlobal!(StdFileHandle.stdin);
 
 /**
     The standard output stream.
-    Bugs:
-        Due to $(LINK2 https://issues.dlang.org/show_bug.cgi?id=15768, bug 15768),
-        it is thread un-safe to reassign `stdout` to a different `File` instance
-        than the default.
+
+    Returns:
+        stdout as a $(LREF File).
+
+    Note:
+        The returned $(LREF File) wraps $(REF stdout,core,stdio), and
+        is therefore thread global. Reassigning `stdout` to a different
+        `File` must be done in a single-threaded or locked context in
+        order to avoid race conditions.
+
+        All writing to `stdout` automatically locks the file globally,
+        and will cause all other threads calling `write` to wait until
+        the lock is released.
 */
 alias stdout = makeGlobal!(StdFileHandle.stdout);
 
+///
+@safe unittest
+{
+    void main()
+    {
+        stdout.writeln("Write a message to stdout.");
+    }
+}
+
+///
+@safe unittest
+{
+    void main()
+    {
+        import std.algorithm.iteration : filter, map, sum;
+        import std.format : format;
+        import std.range : iota, tee;
+
+        int len;
+        const r = 6.iota
+                  .filter!(a => a % 2) // 1 3 5
+                  .map!(a => a * 2) // 2 6 10
+                  .tee!(_ => stdout.writefln("len: %d", len++))
+                  .sum;
+
+        assert(r == 18);
+    }
+}
+
+///
+@safe unittest
+{
+    void main()
+    {
+        import std.algorithm.mutation : copy;
+        import std.algorithm.iteration : map;
+        import std.format : format;
+        import std.range : iota;
+
+        10.iota
+        .map!(e => "N: %d".format(e))
+        .copy(stdout.lockingTextWriter()); // the OutputRange
+    }
+}
+
 /**
     The standard error stream.
-    Bugs:
-        Due to $(LINK2 https://issues.dlang.org/show_bug.cgi?id=15768, bug 15768),
-        it is thread un-safe to reassign `stderr` to a different `File` instance
-        than the default.
+
+    Returns:
+        stderr as a $(LREF File).
+
+    Note:
+        The returned $(LREF File) wraps $(REF stderr,core,stdio), and
+        is therefore thread global. Reassigning `stderr` to a different
+        `File` must be done in a single-threaded or locked context in
+        order to avoid race conditions.
+
+        All writing to `stderr` automatically locks the file globally,
+        and will cause all other threads calling `write` to wait until
+        the lock is released.
 */
 alias stderr = makeGlobal!(StdFileHandle.stderr);
+
+///
+@safe unittest
+{
+    void main()
+    {
+        stderr.writeln("Write a message to stderr.");
+    }
+}
 
 @system unittest
 {

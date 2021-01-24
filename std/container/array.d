@@ -4,7 +4,7 @@
  *
  * This module is a submodule of $(MREF std, container).
  *
- * Source: $(PHOBOSSRC std/container/_array.d)
+ * Source: $(PHOBOSSRC std/container/array.d)
  *
  * Copyright: 2010- Andrei Alexandrescu. All rights reserved by the respective holders.
  *
@@ -318,7 +318,25 @@ if (!is(Unqual!T == bool))
                 const nbytes = mulu(newLength, T.sizeof, overflow);
                 if (overflow)
                     assert(0);
-                _payload = (cast(T*) realloc(_payload.ptr, nbytes))[0 .. newLength];
+
+                static if (hasIndirections!T)
+                {
+                    auto newPayloadPtr = cast(T*) malloc(nbytes);
+                    newPayloadPtr || assert(false, "std.container.Array.length failed to allocate memory.");
+                    auto newPayload = newPayloadPtr[0 .. newLength];
+                    memcpy(newPayload.ptr, _payload.ptr, startEmplace * T.sizeof);
+                    memset(newPayload.ptr + startEmplace, 0,
+                            (newLength - startEmplace) * T.sizeof);
+                    GC.addRange(newPayload.ptr, nbytes);
+                    GC.removeRange(_payload.ptr);
+                    free(_payload.ptr);
+                    _payload = newPayload;
+                }
+                else
+                {
+                    _payload = (cast(T*) realloc(_payload.ptr,
+                            nbytes))[0 .. newLength];
+                }
                 _capacity = newLength;
             }
             else
@@ -442,7 +460,7 @@ if (!is(Unqual!T == bool))
     }
 
     /**
-     * Constructor taking an input range
+     * Constructor taking an $(REF_ALTTEXT input range, isInputRange, std,range,primitives)
      */
     this(Range)(Range r)
     if (isInputRange!Range && isImplicitlyConvertible!(ElementType!Range, T) && !is(Range == T[]))
@@ -1118,9 +1136,17 @@ if (!is(Unqual!T == bool))
 
 @safe unittest
 {
-    // REG https://issues.dlang.org/show_bug.cgi?id=13621
+    // https://issues.dlang.org/show_bug.cgi?id=13621
     import std.container : Array, BinaryHeap;
     alias Heap = BinaryHeap!(Array!int);
+}
+
+@system unittest
+{
+    // https://issues.dlang.org/show_bug.cgi?id=18800
+    static struct S { void* p; }
+    Array!S a;
+    a.length = 10;
 }
 
 @system unittest
@@ -2419,4 +2445,26 @@ if (is(Unqual!T == bool))
     arr ~= v;
     assert(arr[0] == [1, 2, 3]);
     assert(arr[1] == [4, 5, 6]);
+}
+
+// Issue 13642 - Change of length reallocates without calling GC.
+@system unittest
+{
+    import core.memory;
+    class ABC { void func() { int x = 5; } }
+
+    Array!ABC arr;
+    // Length only allocates if capacity is too low.
+    arr.reserve(4);
+    assert(arr.capacity == 4);
+
+    void func() @nogc
+    {
+        arr.length = 5;
+    }
+    func();
+
+    foreach (ref b; arr) b = new ABC;
+    GC.collect();
+    arr[1].func();
 }
