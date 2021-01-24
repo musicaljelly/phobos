@@ -41,7 +41,10 @@ DRUNTIMELIB=$(DRUNTIME)\lib\druntime.lib
 
 ## Flags for dmd D compiler
 
-DFLAGS=-conf= -O -release -w -de -dip25 -I$(DRUNTIME)\import
+# !!!
+# Removed release-specific flags
+DFLAGS=-conf= -w -de -dip25 -I$(DRUNTIME)\import
+# !!!
 #DFLAGS=-unittest -g
 #DFLAGS=-unittest -cov -g
 
@@ -51,16 +54,20 @@ UDFLAGS=-conf= -O -w -dip25 -I$(DRUNTIME)\import
 
 ## C compiler
 
-CC=dmc
-AR=lib
-MAKE=make
+# !!!
+CC=W:\external\DigitalMars\bin\dmc.exe
+AR=W:\external\DigitalMars\bin\lib.exe
+MAKE=W:\external\DigitalMars\bin\make.exe
+# !!!
 
 ## D compiler
 
 DMD_DIR=..\dmd
 BUILD=release
 OS=windows
-DMD=$(DMD_DIR)\generated\$(OS)\$(BUILD)\$(MODEL)\dmd
+# !!!
+DMD=W:\external\DMD\windows\bin\dmd.exe
+# !!!
 
 ## Zlib library
 
@@ -391,6 +398,18 @@ SRC_ZLIB= \
 	etc\c\zlib\win64.mak \
 	etc\c\zlib\linux.mak \
 	etc\c\zlib\osx.mak
+
+# !!!
+release : $(SRC_TO_COMPILE) \
+	$(ZLIB) $(DRUNTIMELIB) win32.mak win64.mak
+	$(DMD) -lib -of$(LIB) -Xfphobos.json $(DFLAGS) -O -release -inline $(SRC_TO_COMPILE) \
+		$(ZLIB) $(DRUNTIMELIB)
+        
+debug : $(SRC_TO_COMPILE) \
+	$(ZLIB) $(DRUNTIMELIB) win32.mak win64.mak
+	$(DMD) -lib -of$(LIB) -Xfphobos.json $(DFLAGS) -g -gs -debug=GameDebug $(SRC_TO_COMPILE) \
+		$(ZLIB) $(DRUNTIMELIB)
+# !!!
 
 $(LIB) : $(SRC_TO_COMPILE) \
 	$(ZLIB) $(DRUNTIMELIB) win32.mak win64.mak
