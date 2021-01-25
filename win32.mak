@@ -43,7 +43,7 @@ DRUNTIMELIB=$(DRUNTIME)\lib\druntime.lib
 
 # !!!
 # Removed release-specific flags
-DFLAGS=-conf= -w -de -dip25 -I$(DRUNTIME)\import
+DFLAGS=-conf= -m$(MODEL) -w -de -dip25 -I$(DRUNTIME)\import
 # !!!
 #DFLAGS=-unittest -g
 #DFLAGS=-unittest -cov -g
