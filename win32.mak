@@ -369,9 +369,14 @@ SRC_ZLIB= \
 	etc\c\zlib\osx.mak
 
 # !!!
+
+# IMPORTANT: Building phobos with -inline doesn't seem to work, and I don't know why. It causes a crash during startup in
+# main->DebugUtil.initLogging()->GetTimestampForFilename(), fairly deep in doing a cast of a SysTime or something of the sort.
+# This feels like it may be a bug in DMD/phobos, but I notice that the official D makefile for phobos does not compile it
+# with -inline. So I will follow its lead and not do so either.
 release : $(SRC_TO_COMPILE) \
 	$(ZLIB) $(DRUNTIMELIB) win32.mak win64.mak
-	$(DMD) -lib -of$(LIB) -Xfphobos.json $(DFLAGS) -O -release -inline $(SRC_TO_COMPILE) \
+	$(DMD) -lib -of$(LIB) -Xfphobos.json $(DFLAGS) -O -release $(SRC_TO_COMPILE) \
 		$(ZLIB) $(DRUNTIMELIB)
         
 debug : $(SRC_TO_COMPILE) \

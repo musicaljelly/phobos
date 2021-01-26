@@ -20,3 +20,7 @@ obj/
 .vscode
 
 *.html
+
+.vs/slnx.sqlite
+
+.vs/
