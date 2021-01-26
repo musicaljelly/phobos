@@ -47,7 +47,7 @@ import std.traits : isSomeString, Unqual;
 import std.typecons : Flag;
 import std.range.primitives : isOutputRange;
 
-version(unittest) import std.exception : assertThrown;
+version (unittest) import std.exception : assertThrown;
 
 @safe unittest
 {
@@ -164,7 +164,7 @@ public:
             date = The date portion of $(LREF DateTime).
             tod  = The time portion of $(LREF DateTime).
       +/
-    this(in Date date, in TimeOfDay tod = TimeOfDay.init) @safe pure nothrow @nogc
+    this(Date date, TimeOfDay tod = TimeOfDay.init) @safe pure nothrow @nogc
     {
         _date = date;
         _tod = tod;
@@ -233,7 +233,7 @@ public:
             $(TR $(TD this &gt; rhs) $(TD &gt; 0))
             )
      +/
-    int opCmp(in DateTime rhs) const @safe pure nothrow @nogc
+    int opCmp(DateTime rhs) const @safe pure nothrow @nogc
     {
         immutable dateResult = _date.opCmp(rhs._date);
 
@@ -473,7 +473,7 @@ public:
         Params:
             date = The Date to set this $(LREF DateTime)'s date portion to.
       +/
-    @property void date(in Date date) @safe pure nothrow @nogc
+    @property void date(Date date) @safe pure nothrow @nogc
     {
         _date = date;
     }
@@ -526,7 +526,7 @@ public:
             tod = The $(REF TimeOfDay,std,datetime,date) to set this
                   $(LREF DateTime)'s time portion to.
       +/
-    @property void timeOfDay(in TimeOfDay tod) @safe pure nothrow @nogc
+    @property void timeOfDay(TimeOfDay tod) @safe pure nothrow @nogc
     {
         _tod = tod;
     }
@@ -593,7 +593,7 @@ public:
 
     @safe unittest
     {
-        static void testDT(DateTime dt, int year, in DateTime expected, size_t line = __LINE__)
+        static void testDT(DateTime dt, int year, DateTime expected, size_t line = __LINE__)
         {
             dt.year = year;
             assert(dt == expected);
@@ -637,7 +637,7 @@ public:
 
     @safe unittest
     {
-        assertThrown!DateTimeException((in DateTime dt){dt.yearBC;}(DateTime(Date(1, 1, 1))));
+        assertThrown!DateTimeException((DateTime dt){dt.yearBC;}(DateTime(Date(1, 1, 1))));
 
         auto dt = DateTime(1999, 7, 6, 12, 30, 33);
         const cdt = DateTime(1999, 7, 6, 12, 30, 33);
@@ -735,7 +735,7 @@ public:
 
     @safe unittest
     {
-        static void testDT(DateTime dt, Month month, in DateTime expected = DateTime.init, size_t line = __LINE__)
+        static void testDT(DateTime dt, Month month, DateTime expected = DateTime.init, size_t line = __LINE__)
         {
             dt.month = month;
             assert(expected != DateTime.init);
@@ -1053,8 +1053,8 @@ public:
 
 
     /++
-        Adds the given number of years or months to this $(LREF DateTime). A
-        negative number will subtract.
+        Adds the given number of years or months to this $(LREF DateTime),
+        mutating it. A negative number will subtract.
 
         Note that if day overflow is allowed, and the date with the adjusted
         year/month overflows the number of days in the new month, then the month
@@ -1070,6 +1070,9 @@ public:
                             $(LREF DateTime).
             allowOverflow = Whether the days should be allowed to overflow,
                             causing the month to increment.
+
+        Returns:
+            A reference to the `DateTime` (`this`).
       +/
     ref DateTime add(string units)
                     (long value, AllowDayOverflow allowOverflow = AllowDayOverflow.yes) @safe pure nothrow @nogc
@@ -1115,8 +1118,8 @@ public:
 
 
     /++
-        Adds the given number of years or months to this $(LREF DateTime). A
-        negative number will subtract.
+        Adds the given number of years or months to this $(LREF DateTime),
+        mutating it. A negative number will subtract.
 
         The difference between rolling and adding is that rolling does not
         affect larger units. Rolling a $(LREF DateTime) 12 months
@@ -1132,6 +1135,9 @@ public:
                             $(LREF DateTime).
             allowOverflow = Whether the days should be allowed to overflow,
                             causing the month to increment.
+
+        Returns:
+            A reference to the `DateTime` (`this`).
       +/
     ref DateTime roll(string units)
                      (long value, AllowDayOverflow allowOverflow = AllowDayOverflow.yes) @safe pure nothrow @nogc
@@ -1185,8 +1191,8 @@ public:
 
 
     /++
-        Adds the given number of units to this $(LREF DateTime). A negative
-        number will subtract.
+        Adds the given number of units to this $(LREF DateTime), mutating it. A
+        negative number will subtract.
 
         The difference between rolling and adding is that rolling does not
         affect larger units. For instance, rolling a $(LREF DateTime) one
@@ -1199,6 +1205,9 @@ public:
             units = The units to add.
             value = The number of $(D_PARAM units) to add to this
                     $(LREF DateTime).
+
+        Returns:
+            A reference to the `DateTime` (`this`).
       +/
     ref DateTime roll(string units)(long value) @safe pure nothrow @nogc
         if (units == "days")
@@ -1253,7 +1262,7 @@ public:
     // Test roll!"hours"().
     @safe unittest
     {
-        static void testDT(DateTime orig, int hours, in DateTime expected, size_t line = __LINE__)
+        static void testDT(DateTime orig, int hours, DateTime expected, size_t line = __LINE__)
         {
             orig.roll!"hours"(hours);
             assert(orig == expected);
@@ -1556,7 +1565,7 @@ public:
     // Test roll!"minutes"().
     @safe unittest
     {
-        static void testDT(DateTime orig, int minutes, in DateTime expected, size_t line = __LINE__)
+        static void testDT(DateTime orig, int minutes, DateTime expected, size_t line = __LINE__)
         {
             orig.roll!"minutes"(minutes);
             assert(orig == expected);
@@ -1856,7 +1865,7 @@ public:
     // Test roll!"seconds"().
     @safe unittest
     {
-        static void testDT(DateTime orig, int seconds, in DateTime expected, size_t line = __LINE__)
+        static void testDT(DateTime orig, int seconds, DateTime expected, size_t line = __LINE__)
         {
             orig.roll!"seconds"(seconds);
             assert(orig == expected);
@@ -2330,7 +2339,7 @@ public:
         $(TR $(TD DateTime) $(TD -) $(TD DateTime) $(TD -->) $(TD duration))
         )
       +/
-    Duration opBinary(string op)(in DateTime rhs) const @safe pure nothrow @nogc
+    Duration opBinary(string op)(DateTime rhs) const @safe pure nothrow @nogc
         if (op == "-")
     {
         immutable dateResult = _date - rhs.date;
@@ -2417,7 +2426,7 @@ public:
         Params:
             rhs = The $(LREF DateTime) to subtract from this one.
       +/
-    int diffMonths(in DateTime rhs) const @safe pure nothrow @nogc
+    int diffMonths(DateTime rhs) const @safe pure nothrow @nogc
     {
         return _date.diffMonths(rhs._date);
     }
@@ -3130,7 +3139,7 @@ public:
             not in the ISO format or if the resulting $(LREF DateTime) would not
             be valid.
       +/
-    static DateTime fromISOString(S)(in S isoString) @safe pure
+    static DateTime fromISOString(S)(scope const S isoString) @safe pure
         if (isSomeString!S)
     {
         import std.algorithm.searching : countUntil;
@@ -3231,7 +3240,7 @@ public:
             not in the ISO Extended format or if the resulting $(LREF DateTime)
             would not be valid.
       +/
-    static DateTime fromISOExtString(S)(in S isoExtString) @safe pure
+    static DateTime fromISOExtString(S)(scope const S isoExtString) @safe pure
         if (isSomeString!(S))
     {
         import std.algorithm.searching : countUntil;
@@ -3331,7 +3340,7 @@ public:
             not in the correct format or if the resulting $(LREF DateTime)
             would not be valid.
       +/
-    static DateTime fromSimpleString(S)(in S simpleString) @safe pure
+    static DateTime fromSimpleString(S)(scope const S simpleString) @safe pure
         if (isSomeString!(S))
     {
         import std.algorithm.searching : countUntil;
@@ -3521,7 +3530,7 @@ private:
 
     @safe unittest
     {
-        static void testDT(DateTime orig, int seconds, in DateTime expected, size_t line = __LINE__)
+        static void testDT(DateTime orig, int seconds, DateTime expected, size_t line = __LINE__)
         {
             orig._addSeconds(seconds);
             assert(orig == expected);
@@ -3766,7 +3775,7 @@ public:
         import std.exception : assertNotThrown;
         assert(Date(1, 1, 1) == Date.init);
 
-        static void testDate(in Date date, int year, int month, int day)
+        static void testDate(Date date, int year, int month, int day)
         {
             assert(date._year == year);
             assert(date._month == month);
@@ -3961,7 +3970,7 @@ public:
             $(TR $(TD this &gt; rhs) $(TD &gt; 0))
             )
      +/
-    int opCmp(in Date rhs) const @safe pure nothrow @nogc
+    int opCmp(Date rhs) const @safe pure nothrow @nogc
     {
         if (_year < rhs._year)
             return -1;
@@ -4126,7 +4135,7 @@ public:
             date.year = year;
         }
 
-        static void testDate(Date date, int year, in Date expected)
+        static void testDate(Date date, int year, Date expected)
         {
             date.year = year;
             assert(date == expected);
@@ -4170,7 +4179,7 @@ public:
 
     @safe unittest
     {
-        assertThrown!DateTimeException((in Date date){date.yearBC;}(Date(1, 1, 1)));
+        assertThrown!DateTimeException((Date date){date.yearBC;}(Date(1, 1, 1)));
 
         auto date = Date(0, 7, 6);
         const cdate = Date(0, 7, 6);
@@ -4271,7 +4280,7 @@ public:
 
     @safe unittest
     {
-        static void testDate(Date date, Month month, in Date expected = Date.init)
+        static void testDate(Date date, Month month, Date expected = Date.init)
         {
             date.month = month;
             assert(expected != Date.init);
@@ -4436,8 +4445,8 @@ public:
 
 
     /++
-        Adds the given number of years or months to this $(LREF Date). A
-        negative number will subtract.
+        Adds the given number of years or months to this $(LREF Date), mutating
+        it. A negative number will subtract.
 
         Note that if day overflow is allowed, and the date with the adjusted
         year/month overflows the number of days in the new month, then the month
@@ -4453,6 +4462,9 @@ public:
                             $(LREF Date).
             allowOverflow = Whether the day should be allowed to overflow,
                             causing the month to increment.
+
+        Returns:
+            A reference to the `Date` (`this`).
       +/
     @safe pure nothrow @nogc
     ref Date add(string units)(long value, AllowDayOverflow allowOverflow = AllowDayOverflow.yes)
@@ -5218,8 +5230,8 @@ public:
 
 
     /++
-        Adds the given number of years or months to this $(LREF Date). A negative
-        number will subtract.
+        Adds the given number of years or months to this $(LREF Date), mutating
+        it. A negative number will subtract.
 
         The difference between rolling and adding is that rolling does not
         affect larger units. Rolling a $(LREF Date) 12 months gets
@@ -5235,6 +5247,9 @@ public:
                             $(LREF Date).
             allowOverflow = Whether the day should be allowed to overflow,
                             causing the month to increment.
+
+        Returns:
+            A reference to the `Date` (`this`).
       +/
     @safe pure nothrow @nogc
     ref Date roll(string units)(long value, AllowDayOverflow allowOverflow = AllowDayOverflow.yes)
@@ -5863,8 +5878,8 @@ public:
 
 
     /++
-        Adds the given number of units to this $(LREF Date). A negative number
-        will subtract.
+        Adds the given number of units to this $(LREF Date), mutating it. A
+        negative number will subtract.
 
         The difference between rolling and adding is that rolling does not
         affect larger units. For instance, rolling a $(LREF Date) one
@@ -5875,6 +5890,9 @@ public:
         Params:
             units = The units to add. Must be `"days"`.
             days  = The number of days to add to this $(LREF Date).
+
+        Returns:
+            A reference to the `Date` (`this`).
       +/
     ref Date roll(string units)(long days) @safe pure nothrow @nogc
         if (units == "days")
@@ -6279,7 +6297,7 @@ public:
         $(TR $(TD Date) $(TD -) $(TD Date) $(TD -->) $(TD duration))
         )
       +/
-    Duration opBinary(string op)(in Date rhs) const @safe pure nothrow @nogc
+    Duration opBinary(string op)(Date rhs) const @safe pure nothrow @nogc
         if (op == "-")
     {
         import core.time : dur;
@@ -6335,7 +6353,7 @@ public:
         Params:
             rhs = The $(LREF Date) to subtract from this one.
       +/
-    int diffMonths(in Date rhs) const @safe pure nothrow @nogc
+    int diffMonths(Date rhs) const @safe pure nothrow @nogc
     {
         immutable yearDiff = _year - rhs._year;
         immutable monthDiff = _month - rhs._month;
@@ -7471,7 +7489,7 @@ public:
             not in the ISO format or if the resulting $(LREF Date) would not be
             valid.
       +/
-    static Date fromISOString(S)(in S isoString) @safe pure
+    static Date fromISOString(S)(scope const S isoString) @safe pure
         if (isSomeString!S)
     {
         import std.algorithm.searching : startsWith;
@@ -7614,7 +7632,7 @@ public:
             not in the ISO Extended format or if the resulting $(LREF Date)
             would not be valid.
       +/
-    static Date fromISOExtString(S)(in S isoExtString) @safe pure
+    static Date fromISOExtString(S)(scope const S isoExtString) @safe pure
         if (isSomeString!(S))
     {
         import std.algorithm.searching : startsWith;
@@ -7752,7 +7770,7 @@ public:
             not in the correct format or if the resulting $(LREF Date) would not
             be valid.
       +/
-    static Date fromSimpleString(S)(in S simpleString) @safe pure
+    static Date fromSimpleString(S)(scope const S simpleString) @safe pure
         if (isSomeString!(S))
     {
         import std.algorithm.searching : startsWith;
@@ -8227,7 +8245,7 @@ public:
             $(TR $(TD this &gt; rhs) $(TD &gt; 0))
             )
      +/
-    int opCmp(in TimeOfDay rhs) const @safe pure nothrow @nogc
+    int opCmp(TimeOfDay rhs) const @safe pure nothrow @nogc
     {
         if (_hour < rhs._hour)
             return -1;
@@ -8438,8 +8456,8 @@ public:
 
 
     /++
-        Adds the given number of units to this $(LREF TimeOfDay). A negative
-        number will subtract.
+        Adds the given number of units to this $(LREF TimeOfDay), mutating it. A
+        negative number will subtract.
 
         The difference between rolling and adding is that rolling does not
         affect larger units. For instance, rolling a $(LREF TimeOfDay)
@@ -8452,6 +8470,9 @@ public:
             units = The units to add.
             value = The number of $(D_PARAM units) to add to this
                     $(LREF TimeOfDay).
+
+        Returns:
+            A reference to the `TimeOfDay` (`this`).
       +/
     ref TimeOfDay roll(string units)(long value) @safe pure nothrow @nogc
         if (units == "hours")
@@ -8526,7 +8547,7 @@ public:
     // Test roll!"minutes"().
     @safe unittest
     {
-        static void testTOD(TimeOfDay orig, int minutes, in TimeOfDay expected, size_t line = __LINE__)
+        static void testTOD(TimeOfDay orig, int minutes, TimeOfDay expected, size_t line = __LINE__)
         {
             orig.roll!"minutes"(minutes);
             assert(orig == expected);
@@ -8610,7 +8631,7 @@ public:
     // Test roll!"seconds"().
     @safe unittest
     {
-        static void testTOD(TimeOfDay orig, int seconds, in TimeOfDay expected, size_t line = __LINE__)
+        static void testTOD(TimeOfDay orig, int seconds, TimeOfDay expected, size_t line = __LINE__)
         {
             orig.roll!"seconds"(seconds);
             assert(orig == expected);
@@ -8851,7 +8872,7 @@ public:
         Params:
             rhs = The $(LREF TimeOfDay) to subtract from this one.
       +/
-    Duration opBinary(string op)(in TimeOfDay rhs) const @safe pure nothrow @nogc
+    Duration opBinary(string op)(TimeOfDay rhs) const @safe pure nothrow @nogc
         if (op == "-")
     {
         immutable lhsSec = _hour * 3600 + _minute * 60 + _second;
@@ -9048,7 +9069,7 @@ public:
             not in the ISO format or if the resulting $(LREF TimeOfDay) would
             not be valid.
       +/
-    static TimeOfDay fromISOString(S)(in S isoString) @safe pure
+    static TimeOfDay fromISOString(S)(scope const S isoString) @safe pure
         if (isSomeString!S)
     {
         import std.conv : to, text, ConvException;
@@ -9173,7 +9194,7 @@ public:
             not in the ISO Extended format or if the resulting $(LREF TimeOfDay)
             would not be valid.
       +/
-    static TimeOfDay fromISOExtString(S)(in S isoExtString) @safe pure
+    static TimeOfDay fromISOExtString(S)(scope const S isoExtString) @safe pure
         if (isSomeString!S)
     {
         import std.conv : ConvException, text, to;
@@ -9363,7 +9384,7 @@ private:
 
     @safe unittest
     {
-        static void testTOD(TimeOfDay orig, int seconds, in TimeOfDay expected, size_t line = __LINE__)
+        static void testTOD(TimeOfDay orig, int seconds, TimeOfDay expected, size_t line = __LINE__)
         {
             orig._addSeconds(seconds);
             assert(orig == expected);
@@ -10416,8 +10437,9 @@ if (isSomeString!T)
 }
 
 
-version(unittest)
+version (unittest)
 {
+private:
     // All of these helper arrays are sorted in ascending order.
     auto testYearsBC = [-1999, -1200, -600, -4, -1, 0];
     auto testYearsAD = [1, 4, 1000, 1999, 2000, 2012];

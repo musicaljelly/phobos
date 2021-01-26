@@ -97,19 +97,19 @@ extern (C)
 }
 // !!!
 
-version(OSX)
+version (OSX)
 {
     version = useSysctlbyname;
 }
-else version(FreeBSD)
+else version (FreeBSD)
 {
     version = useSysctlbyname;
 }
-else version(DragonFlyBSD)
+else version (DragonFlyBSD)
 {
     version = useSysctlbyname;
 }
-else version(NetBSD)
+else version (NetBSD)
 {
     version = useSysctlbyname;
 }
@@ -692,7 +692,7 @@ struct Task(alias fun, Args...)
             if (job !is null)
             {
 
-                version(verboseUnittest)
+                version (verboseUnittest)
                 {
                     stderr.writeln("Doing workForce work.");
                 }
@@ -713,7 +713,7 @@ struct Task(alias fun, Args...)
             }
             else
             {
-                version(verboseUnittest)
+                version (verboseUnittest)
                 {
                     stderr.writeln("Yield from workForce.");
                 }
@@ -956,7 +956,7 @@ if (is(typeof(fun(args))) && isSafeTask!F)
     return ret;
 }
 
-version(useSysctlbyname)
+version (useSysctlbyname)
     private extern(C) int sysctlbyname(
         const char *, void *, size_t *, void *, size_t
     ) @nogc nothrow;
@@ -970,7 +970,7 @@ alias totalCPUs =
 
 uint totalCPUsImpl() @nogc nothrow @trusted
 {
-    version(Windows)
+    version (Windows)
     {
         // BUGS:  Only works on Windows 2000 and above.
         import core.sys.windows.windows : SYSTEM_INFO, GetSystemInfo;
@@ -979,31 +979,31 @@ uint totalCPUsImpl() @nogc nothrow @trusted
         GetSystemInfo(&si);
         return max(1, cast(uint) si.dwNumberOfProcessors);
     }
-    else version(linux)
+    else version (linux)
     {
         import core.sys.posix.unistd : _SC_NPROCESSORS_ONLN, sysconf;
         return cast(uint) sysconf(_SC_NPROCESSORS_ONLN);
     }
-    else version(Solaris)
+    else version (Solaris)
     {
         import core.sys.posix.unistd : _SC_NPROCESSORS_ONLN, sysconf;
         return cast(uint) sysconf(_SC_NPROCESSORS_ONLN);
     }
-    else version(useSysctlbyname)
+    else version (useSysctlbyname)
     {
-        version(OSX)
+        version (OSX)
         {
             auto nameStr = "machdep.cpu.core_count\0".ptr;
         }
-        else version(FreeBSD)
+        else version (FreeBSD)
         {
             auto nameStr = "hw.ncpu\0".ptr;
         }
-        else version(DragonFlyBSD)
+        else version (DragonFlyBSD)
         {
             auto nameStr = "hw.ncpu\0".ptr;
         }
-        else version(NetBSD)
+        else version (NetBSD)
         {
             auto nameStr = "hw.ncpu\0".ptr;
         }
@@ -3660,6 +3660,22 @@ ParallelForeach!R parallel(R)(R range, size_t workUnitSize)
     return taskPool.parallel(range, workUnitSize);
 }
 
+// #17019: `each` should be usable with parallel
+@system unittest
+{
+    import std.algorithm.iteration : each, sum;
+    import std.range : iota;
+
+    // check behavior with parallel
+    auto arr = new int[10];
+    parallel(arr).each!((ref e) => e += 1);
+    assert(arr.sum == 10);
+
+    auto arrIndex = new int[10];
+    parallel(arrIndex).each!((i, ref e) => e += i);
+    assert(arrIndex.sum == 10.iota.sum);
+}
+
 // Thrown when a parallel foreach loop is broken from.
 class ParallelForeachError : Error
 {
@@ -4204,10 +4220,10 @@ private struct RoundRobinBuffer(C1, C2)
     }
 }
 
-version(unittest)
+version (unittest)
 {
     // This was the only way I could get nested maps to work.
-    __gshared TaskPool poolInstance;
+    private __gshared TaskPool poolInstance;
 }
 
 // These test basic functionality but don't stress test for threading bugs.
@@ -4623,7 +4639,7 @@ version(unittest)
 
 // These are more like stress tests than real unit tests.  They print out
 // tons of stuff and should not be run every time make unittest is run.
-version(parallelismStressTest)
+version (parallelismStressTest)
 {
     @safe unittest
     {

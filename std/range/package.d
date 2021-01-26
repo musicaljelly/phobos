@@ -235,7 +235,7 @@ public import std.typecons : Flag, Yes, No;
 
 import std.meta; // allSatisfy, staticMap
 import std.traits; // CommonType, isCallable, isFloatingPoint, isIntegral,
-    // isPointer, isSomeFunction, isStaticArray, Unqual
+    // isPointer, isSomeFunction, isStaticArray, Unqual, isInstanceOf
 
 
 /**
@@ -5422,7 +5422,7 @@ if (allSatisfy!(isInputRange, Ranges))
     // Just make sure 1-range case instantiates.  This hangs the compiler
     // when no explicit stopping policy is specified due to Bug 4652.
     auto stuff = lockstep([1,2,3,4,5], StoppingPolicy.shortest);
-    foreach (int i, a; stuff)
+    foreach (i, a; stuff)
     {
         assert(stuff[i] == a);
     }
@@ -7219,6 +7219,17 @@ if (isForwardRange!RangeOfRanges &&
     this(RangeOfRanges input)
     {
         this._input = input;
+        static if (opt == TransverseOptions.enforceNotJagged)
+        {
+            import std.exception : enforce;
+
+            if (empty) return;
+            immutable commonLength = _input.front.length;
+            foreach (e; _input)
+            {
+                enforce(e.length == commonLength);
+            }
+        }
     }
 
     @property auto front()
@@ -7324,6 +7335,14 @@ private:
     assert(z.front.equal([1,4]));
     assert(z[0].equal([1,4]));
     assert(!is(typeof(z[0][0])));
+}
+
+@safe unittest
+{
+    import std.exception : assertThrown;
+
+    auto r = [[1,2], [3], [4,5], [], [6]];
+    assertThrown(r.transposed!(TransverseOptions.enforceNotJagged));
 }
 
 /**
@@ -9474,7 +9493,7 @@ private struct OnlyResult(T, size_t arity)
     private size_t backIndex = 0;
 
     // @@@BUG@@@ 10643
-    version(none)
+    version (none)
     {
         import std.traits : hasElaborateAssign;
         static if (hasElaborateAssign!T)
@@ -10119,7 +10138,7 @@ pure @safe unittest
     }}
 }
 
-version(none) // @@@BUG@@@ 10939
+version (none) // @@@BUG@@@ 10939
 {
     // Re-enable (or remove) if 10939 is resolved.
     /+pure+/ @safe unittest // Impure because of std.conv.to
@@ -10182,8 +10201,8 @@ template isTwoWayCompatible(alias fn, T1, T2)
             T1 foo();
             T2 bar();
 
-            fn(foo(), bar());
-            fn(bar(), foo());
+            cast(void) fn(foo(), bar());
+            cast(void) fn(bar(), foo());
         }
     ));
 }
@@ -10281,7 +10300,7 @@ corresponding `SortedRange`. To construct a `SortedRange` from a range
 below.
 */
 struct SortedRange(Range, alias pred = "a < b")
-if (isInputRange!Range)
+if (isInputRange!Range && !isInstanceOf!(SortedRange, Range))
 {
     import std.functional : binaryFun;
 
@@ -10731,6 +10750,14 @@ sorting relation.
     }
 }
 
+/// ditto
+template SortedRange(Range, alias pred = "a < b")
+if (isInstanceOf!(SortedRange, Range))
+{
+    // Avoid nesting SortedRange types (see Issue 18933);
+    alias SortedRange = SortedRange!(Unqual!(typeof(Range._input)), pred);
+}
+
 ///
 @safe unittest
 {
@@ -10888,6 +10915,14 @@ that break its sorted-ness, `SortedRange` will work erratically.
     f.close();
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=19337
+@safe unittest
+{
+    import std.algorithm.sorting : sort;
+    auto a = [ 1, 2, 3, 42, 52, 64 ];
+    a.sort.sort!"a > b";
+}
+
 /**
 Assumes `r` is sorted by predicate `pred` and returns the
 corresponding $(D SortedRange!(pred, R)) having `r` as support. To
@@ -10904,7 +10939,20 @@ cost $(BIGOH n), use $(REF isSorted, std,algorithm,sorting).
 auto assumeSorted(alias pred = "a < b", R)(R r)
 if (isInputRange!(Unqual!R))
 {
-    return SortedRange!(Unqual!R, pred)(r);
+    // Avoid senseless `SortedRange!(SortedRange!(...), pred)` nesting.
+    static if (is(R == SortedRange!(RRange, RPred), RRange, alias RPred))
+    {
+        static if (isInputRange!R && __traits(isSame, pred, RPred))
+            // If the predicate is the same and we don't need to cast away
+            // constness for the result to be an input range.
+            return r;
+        else
+            return SortedRange!(Unqual!(typeof(r._input)), pred)(r._input);
+    }
+    else
+    {
+        return SortedRange!(Unqual!R, pred)(r);
+    }
 }
 
 ///
@@ -10930,6 +10978,10 @@ if (isInputRange!(Unqual!R))
     assert(equal(p, [4, 4, 5, 6 ]));
     p = assumeSorted(a).upperBound(4.2);
     assert(equal(p, [ 5, 6 ]));
+
+    // Issue 18933 - don't create senselessly nested SortedRange types.
+    assert(is(typeof(assumeSorted(a)) == typeof(assumeSorted(assumeSorted(a)))));
+    assert(is(typeof(assumeSorted(a)) == typeof(assumeSorted(assumeSorted!"a > b"(a)))));
 }
 
 @safe unittest
@@ -11062,7 +11114,7 @@ public:
     }
 
 
-    version(StdDdoc)
+    version (StdDdoc)
     {
         /++ +/
         @property auto front() {assert(0);}
@@ -11090,7 +11142,7 @@ public:
     }
 
 
-    version(StdDdoc)
+    version (StdDdoc)
     {
         @property bool empty(); ///
         @property bool empty() const; ///Ditto
@@ -11118,7 +11170,7 @@ public:
     }
 
 
-    version(StdDdoc)
+    version (StdDdoc)
     {
         /++
             Only defined if `isForwardRange!R` is `true`.
@@ -11188,7 +11240,7 @@ public:
     }
 
 
-    version(StdDdoc)
+    version (StdDdoc)
     {
         /++
             Only defined if `isBidirectionalRange!R` is `true`.
@@ -11225,7 +11277,7 @@ public:
     }
 
 
-    version(StdDdoc)
+    version (StdDdoc)
     {
         /++
             Only defined if `isRandomAccesRange!R` is `true`.
@@ -11281,7 +11333,7 @@ public:
     }
 
 
-    version(StdDdoc)
+    version (StdDdoc)
     {
         /++
             Only defined if `hasLength!R` is `true`.
@@ -11310,7 +11362,7 @@ public:
     }
 
 
-    version(StdDdoc)
+    version (StdDdoc)
     {
         /++
             Only defined if `hasSlicing!R` is `true`.

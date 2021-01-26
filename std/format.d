@@ -44,7 +44,7 @@ $(TR $(TH Function Name) $(TH Description)
 
    The functions $(LREF formatValue) and $(LREF unformatValue) are
    used for the plumbing.
-   Copyright: Copyright Digital Mars 2000-2013.
+   Copyright: Copyright The D Language Foundation 2000-2013.
 
    License: $(HTTP boost.org/LICENSE_1_0.txt, Boost License 1.0).
 
@@ -149,6 +149,7 @@ $(I FormatStringItem):
     $(B '%%')
     $(B '%') $(I Position) $(I Flags) $(I Width) $(I Separator) $(I Precision) $(I FormatChar)
     $(B '%$(LPAREN)') $(I FormatString) $(B '%$(RPAREN)')
+    $(B '%-$(LPAREN)') $(I FormatString) $(B '%$(RPAREN)')
     $(I OtherCharacterExceptPercent)
 $(I Position):
     $(I empty)
@@ -620,6 +621,14 @@ uint formattedWrite(Writer, Char, A...)(auto ref Writer w, in Char[] fmt, A args
     assert(w.data == "@safe/pure 42");
 }
 
+@safe pure unittest
+{
+    char[20] buf;
+    auto w = buf[];
+    formattedWrite(w, "%s %d", "@safe/pure", 42);
+    assert(buf[0 .. $ - w.length] == "@safe/pure 42");
+}
+
 /**
 Reads characters from $(REF_ALTTEXT input range, isInputRange, std,range,primitives)
 `r`, converts them according to `fmt`, and writes them to `args`.
@@ -1071,7 +1080,7 @@ if (is(Unqual!Char == Char))
     */
     ubyte indexEnd;
 
-    version(StdDdoc)
+    version (StdDdoc)
     {
         /**
          The format specifier contained a `'-'` (`printf`
@@ -1523,7 +1532,7 @@ if (is(Unqual!Char == Char))
                 }
                 else
                 {
-                    enforce(!r.empty,
+                    enforceFmt(!r.empty,
                             text("parseToFormatSpec: Cannot find character '",
                                     c, "' in the input string."));
                     if (r.front != trailing.front) break;
@@ -2348,13 +2357,14 @@ private void formatUnsigned(Writer, T, Char)
     size_t leftpad = 0;
     size_t rightpad = 0;
 
+    immutable size_t dlen = digits.length == 0 ? 0 : digits.length - 1;
     immutable ptrdiff_t spacesToPrint =
         fs.width - (
               (prefix1 != 0)
             + (prefix2 != 0)
             + zerofill
             + digits.length
-            + ((fs.flSeparator != 0) * ((digits.length - 1) / fs.separators))
+            + ((fs.flSeparator != 0) * (dlen / fs.separators))
         );
     if (spacesToPrint > 0) // need to do some padding
     {
@@ -2419,6 +2429,11 @@ private void formatUnsigned(Writer, T, Char)
 
     foreach (i ; 0 .. rightpad)
         put(w, ' ');
+}
+
+@safe pure unittest  // bugzilla 18838
+{
+    assert("%12,d".format(0) == "           0");
 }
 
 @safe pure unittest
@@ -2545,7 +2560,7 @@ if (is(FloatingPointTypeOf!T) && !is(T == enum) && !hasToString!(T, Char))
 
         if (s.length > 0)
         {
-          version(none)
+          version (none)
           {
             return formatValueImpl(w, s, f);
           }
@@ -2739,7 +2754,7 @@ if (is(Unqual!T : creal) && !is(T == enum) && !hasToString!(T, Char))
     put(w, 'i');
 }
 
-version(TestComplex)
+version (TestComplex)
 deprecated
 @safe /*pure*/ unittest     // formatting floating point values is now impure
 {
@@ -2758,7 +2773,7 @@ deprecated
     }
 }
 
-version(TestComplex)
+version (TestComplex)
 deprecated
 @system unittest
 {
@@ -2790,7 +2805,7 @@ if (is(Unqual!T : ireal) && !is(T == enum) && !hasToString!(T, Char))
     put(w, 'i');
 }
 
-version(TestComplex)
+version (TestComplex)
 deprecated
 @safe /*pure*/ unittest     // formatting floating point values is now impure
 {
@@ -2803,7 +2818,7 @@ deprecated
     }
 }
 
-version(TestComplex)
+version (TestComplex)
 deprecated
 @system unittest
 {
@@ -3332,11 +3347,24 @@ if (isInputRange!T)
         for (;;)
         {
             auto fmt = FormatSpec!Char(f.nested);
-            fmt.writeUpToNextSpec(w);
-            if (f.flDash)
-                formatValue(w, val.front, fmt);
-            else
-                formatElement(w, val.front, fmt);
+            w: while (true)
+            {
+                immutable r = fmt.writeUpToNextSpec(w);
+                // There was no format specifier, so break
+                if (!r)
+                    break;
+                if (f.flDash)
+                    formatValue(w, val.front, fmt);
+                else
+                    formatElement(w, val.front, fmt);
+                // Check if there will be a format specifier farther on in the
+                // string. If so, continue the loop, otherwise break. This
+                // prevents extra copies of the `sep` from showing up.
+                foreach (size_t i; 0 .. fmt.trailing.length)
+                    if (fmt.trailing[i] == '%')
+                        continue w;
+                break w;
+            }
             if (f.sep !is null)
             {
                 put(w, fmt.trailing);
@@ -3356,6 +3384,11 @@ if (isInputRange!T)
     }
     else
         throw new FormatException(text("Incorrect format specifier for range: %", f.spec));
+}
+
+@safe pure unittest // Issue 18778
+{
+    assert(format("%-(%1$s - %1$s, %)", ["A", "B", "C"]) == "A - A, B - B, C - C");
 }
 
 @safe pure unittest
@@ -3761,38 +3794,46 @@ private template hasToString(T, Char)
     static assert(hasToString!(L, char) == 0);
 }
 
+// Like NullSink, but toString() isn't even called at all. Used to test the format string.
+private struct NoOpSink
+{
+    void put(E)(scope const E) pure @safe @nogc nothrow {}
+}
+
 // object formatting with toString
 private void formatObject(Writer, T, Char)(ref Writer w, ref T val, const ref FormatSpec!Char f)
 if (hasToString!(T, Char))
 {
     enum overload = hasToString!(T, Char);
 
+    enum noop = is(Writer == NoOpSink);
+
     static if (overload == 6)
     {
-        val.toString(w, f);
+        static if (!noop) val.toString(w, f);
     }
     else static if (overload == 5)
     {
-        val.toString(w);
+        static if (!noop) val.toString(w);
     }
     // not using the overload enum to not break badly defined toString overloads
     // e.g. defining the FormatSpec as ref and not const ref led this function
     // to ignore that toString overload
     else static if (is(typeof(val.toString((scope const(char)[] s){}, f))))
     {
-        val.toString((scope const(char)[] s) { put(w, s); }, f);
+        static if (!noop) val.toString((scope const(char)[] s) { put(w, s); }, f);
     }
     else static if (is(typeof(val.toString((scope const(char)[] s){}, "%s"))))
     {
-        val.toString((const(char)[] s) { put(w, s); }, f.getCurFmtStr());
+        static if (!noop) val.toString((const(char)[] s) { put(w, s); }, f.getCurFmtStr());
     }
     else static if (is(typeof(val.toString((scope const(char)[] s){}))))
     {
-        val.toString((scope const(char)[] s) { put(w, s); });
+        static if (!noop) val.toString((scope const(char)[] s) { put(w, s); });
     }
     else static if (is(typeof(val.toString()) S) && isSomeString!S)
     {
-        put(w, val.toString());
+        static if (!noop) put(w, val.toString());
     }
     else
     {
@@ -3979,7 +4020,7 @@ if (is(T == class) && !is(T == enum))
 
 // outside the unittest block, otherwise the FQN of the
 // class contains the line number of the unittest
-version(unittest)
+version (unittest)
 {
     private class C {}
 }
@@ -4002,6 +4043,27 @@ version(unittest)
     shared(C) c4 = new C();
     s = format("%s", c4);
     assert(s == "shared(std.format.C)");
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=19003
+@safe unittest
+{
+    struct S
+    {
+        int i;
+
+        @disable this();
+
+        invariant { assert(this.i); }
+
+        this(int i) @safe in { assert(i); } do { this.i = i; }
+
+        string toString() { return "S"; }
+    }
+
+    S s = S(1);
+
+    format!"%s"(s);
 }
 
 // https://issues.dlang.org/show_bug.cgi?id=7879
@@ -4538,8 +4600,8 @@ private T getNth(string kind, alias Condition, T, A...)(uint index, A args)
 
 /* ======================== Unit Tests ====================================== */
 
-version(unittest)
-void formatTest(T)(T val, string expected, size_t ln = __LINE__, string fn = __FILE__)
+version (unittest)
+private void formatTest(T)(T val, string expected, size_t ln = __LINE__, string fn = __FILE__)
 {
     import core.exception : AssertError;
     import std.array : appender;
@@ -4552,8 +4614,8 @@ void formatTest(T)(T val, string expected, size_t ln = __LINE__, string fn = __F
             text("expected = `", expected, "`, result = `", w.data, "`"), fn, ln);
 }
 
-version(unittest)
-void formatTest(T)(string fmt, T val, string expected, size_t ln = __LINE__, string fn = __FILE__) @safe
+version (unittest)
+private void formatTest(T)(string fmt, T val, string expected, size_t ln = __LINE__, string fn = __FILE__) @safe
 {
     import core.exception : AssertError;
     import std.array : appender;
@@ -4565,8 +4627,8 @@ void formatTest(T)(string fmt, T val, string expected, size_t ln = __LINE__, str
             text("expected = `", expected, "`, result = `", w.data, "`"), fn, ln);
 }
 
-version(unittest)
-void formatTest(T)(T val, string[] expected, size_t ln = __LINE__, string fn = __FILE__)
+version (unittest)
+private void formatTest(T)(T val, string[] expected, size_t ln = __LINE__, string fn = __FILE__)
 {
     import core.exception : AssertError;
     import std.array : appender;
@@ -4583,8 +4645,8 @@ void formatTest(T)(T val, string[] expected, size_t ln = __LINE__, string fn = _
             text("expected one of `", expected, "`, result = `", w.data, "`"), fn, ln);
 }
 
-version(unittest)
-void formatTest(T)(string fmt, T val, string[] expected, size_t ln = __LINE__, string fn = __FILE__) @safe
+version (unittest)
+private void formatTest(T)(string fmt, T val, string[] expected, size_t ln = __LINE__, string fn = __FILE__) @safe
 {
     import core.exception : AssertError;
     import std.array : appender;
@@ -5065,8 +5127,8 @@ here:
     assert(a == "hello" && b == 124 && c == 34.5);
 }
 
-version(unittest)
-void formatReflectTest(T)(ref T val, string fmt, string formatted, string fn = __FILE__, size_t ln = __LINE__)
+version (unittest)
+private void formatReflectTest(T)(ref T val, string fmt, string formatted, string fn = __FILE__, size_t ln = __LINE__)
 {
     import core.exception : AssertError;
     import std.array : appender;
@@ -5107,8 +5169,8 @@ void formatReflectTest(T)(ref T val, string fmt, string formatted, string fn = _
             input, fn, ln);
 }
 
-version(unittest)
-void formatReflectTest(T)(ref T val, string fmt, string[] formatted, string fn = __FILE__, size_t ln = __LINE__)
+version (unittest)
+private void formatReflectTest(T)(ref T val, string fmt, string[] formatted, string fn = __FILE__, size_t ln = __LINE__)
 {
     import core.exception : AssertError;
     import std.array : appender;
@@ -5856,7 +5918,7 @@ private bool needToSwapEndianess(Char)(const ref FormatSpec!Char f)
     assert(s == "1193135 2947526575");
 }
 
-version(TestComplex)
+version (TestComplex)
 deprecated
 @system unittest
 {
@@ -6164,8 +6226,14 @@ deprecated
 // Used to check format strings are compatible with argument types
 package static const checkFormatException(alias fmt, Args...) =
 {
+    import std.conv : text;
+
     try
-        .format(fmt, Args.init);
+    {
+        auto n = .formattedWrite(NoOpSink(), fmt, Args.init);
+
+        enforceFmt(n == Args.length, text("Orphan format arguments: args[", n, "..", Args.length, "]"));
+    }
     catch (Exception e)
         return (e.msg == ctfpMessage) ? null : e;
     return null;
@@ -6278,8 +6346,11 @@ private size_t guessLength(Char, S)(S fmtString)
 
         if (spec.width == spec.precision)
             len += spec.width;
-        else if (spec.width > 0 && (spec.precision == spec.UNSPECIFIED || spec.width > spec.precision))
+        else if (spec.width > 0 && spec.width != spec.DYNAMIC &&
+                 (spec.precision == spec.UNSPECIFIED || spec.width > spec.precision))
+        {
             len += spec.width;
+        }
         else if (spec.precision != spec.UNSPECIFIED && spec.precision > spec.width)
             len += spec.precision;
     }
@@ -6302,6 +6373,7 @@ unittest
     assert(guessLength!char("%2.4f") == 4);
     assert(guessLength!char("%02d:%02d:%02d") == 8);
     assert(guessLength!char("%0.2f") == 7);
+    assert(guessLength!char("%0*d") == 0);
 }
 
 /// ditto

@@ -36,8 +36,8 @@ CFLAGS=-mn -6 -r
 
 ## Location of druntime tree
 
-DRUNTIME=..\druntime
-DRUNTIMELIB=$(DRUNTIME)\lib\druntime.lib
+DRUNTIME=../druntime
+DRUNTIMELIB=$(DRUNTIME)/lib/druntime.lib
 
 ## Flags for dmd D compiler
 
@@ -62,7 +62,7 @@ MAKE=W:\external\DigitalMars\bin\make.exe
 
 ## D compiler
 
-DMD_DIR=..\dmd
+DMD_DIR=../dmd
 BUILD=release
 OS=windows
 # !!!
@@ -558,4 +558,9 @@ install: phobos.zip
 
 auto-tester-build: targets
 
-auto-tester-test: unittest
+JOBS=$(NUMBER_OF_PROCESSORS)
+GMAKE=gmake
+
+auto-tester-test:
+	$(GMAKE) -j$(JOBS) -f posix.mak unittest BUILD=release DMD="$(DMD)" OS=win$(MODEL) \
+	CUSTOM_DRUNTIME=1 PIC=0 MODEL=$(MODEL) DRUNTIME=$(DRUNTIMELIB) CC=$(CC)

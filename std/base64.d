@@ -391,7 +391,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
      *  The number of times the output range's `put` method was invoked.
      */
     size_t encode(E, R)(scope const(E)[] source, auto ref R range)
-    if (is(E : ubyte) && isOutputRange!(R, char))
+    if (is(E : ubyte) && isOutputRange!(R, char) && !is(R == char[]))
     out(result)
     {
         assert(result == encodeLength(source.length), "The number of put is different from the length of Base64");
@@ -1908,7 +1908,7 @@ class Base64Exception : Exception
 
     // @@@9543@@@ These tests were disabled because they actually relied on the input range having length.
     // The implementation (currently) doesn't support encoding/decoding from a length-less source.
-    version(none)
+    version (none)
     { // with InputRange
         // InputRange to ubyte[] or char[]
         auto encoded = Base64.encode(map!(to!(ubyte))(["20", "251", "156", "3", "217", "126"]));

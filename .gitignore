@@ -21,6 +21,8 @@ obj/
 
 *.html
 
-.vs/slnx.sqlite
-
 .vs/
+
+.dub/
+libphobos_*
+source/

@@ -415,7 +415,8 @@ if (!areCopyCompatibleArrays!(SourceRange, TargetRange) &&
     }
     else
     {
-        put(target, source);
+        foreach (element; source)
+            put(target, element);
         return target;
     }
 }
@@ -534,6 +535,24 @@ $(LINK2 http://en.cppreference.com/w/cpp/algorithm/copy_backward, STL's `copy_ba
         assert(a1[] == "123");
         assert(a2[] == "123789");
     }}
+}
+
+@safe unittest // issue 18804
+{
+    static struct NullSink
+    {
+        void put(E)(E) {}
+    }
+    int line = 0;
+    struct R
+    {
+        int front;
+        @property bool empty() { return line == 1; }
+        void popFront() { line = 1; }
+    }
+    R r;
+    copy(r, NullSink());
+    assert(line == 1);
 }
 
 /**
@@ -856,9 +875,9 @@ if (isInputRange!Range && hasLvalueElements!Range && hasAssignableElements!Range
         //We avoid calling emplace here, because our goal is to initialize to
         //the static state of T.init,
         //So we want to avoid any un-necassarilly CC'ing of T.init
-        auto p = typeid(T).initializer();
-        if (p.ptr)
+        static if (!__traits(isZeroInit, T))
         {
+            auto p = typeid(T).initializer();
             for ( ; !range.empty ; range.popFront() )
             {
                 static if (__traits(isStaticArray, T))
@@ -1390,11 +1409,13 @@ void moveEmplace(T)(ref T source, ref T target) @system
             else
                 enum sz = T.sizeof;
 
-            auto init = typeid(T).initializer();
-            if (init.ptr is null) // null ptr means initialize to 0s
+            static if (__traits(isZeroInit, T))
                 memset(&source, 0, sz);
             else
+            {
+                auto init = typeid(T).initializer();
                 memcpy(&source, init.ptr, sz);
+            }
         }
     }
     else
@@ -1623,8 +1644,8 @@ concerns the swapping of elements that are not the core concern of the
 algorithm. For example, consider an algorithm that sorts $(D [ "abc",
 "b", "aBc" ]) according to `toUpper(a) < toUpper(b)`. That
 algorithm might choose to swap the two equivalent strings `"abc"`
-and `"aBc"`. That does not affect the sorting since both `$D(
-"abc", "aBc", "b" ]) and `[ "aBc", "abc", "b" ]` are valid
+and `"aBc"`. That does not affect the sorting since both
+`["abc", "aBc", "b" ]` and `[ "aBc", "abc", "b" ]` are valid
 outcomes.
 
 Some situations require that the algorithm must NOT ever change the
