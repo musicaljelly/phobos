@@ -1061,7 +1061,7 @@ if (!(isImplicitlyConvertible!(S, T) &&
 private T toImpl(T, S)(ref S value)
 if (!(isImplicitlyConvertible!(S, T) &&
     !isEnumStrToStr!(S, T) && !isNullToStr!(S, T)) &&
-    !isInfinite!S && isExactSomeString!T && !isCopyable!S)
+    !isInfinite!S && isExactSomeString!T && !isCopyable!S && !isStaticArray!S)
 {
     import std.array : appender;
     import std.format : FormatSpec, formatValue;
@@ -1098,6 +1098,18 @@ if (!(isImplicitlyConvertible!(S, T) &&
 
     auto b = B();
     assert(to!string(b) == "B(0, false)");
+}
+
+// Bugzilla 20070
+@safe unittest
+{
+    void writeThem(T)(ref inout(T) them)
+    {
+        assert(them.to!string == "[1, 2, 3, 4]");
+    }
+
+    const(uint)[4] vals = [ 1, 2, 3, 4 ];
+    writeThem(vals);
 }
 
 /*
@@ -1439,6 +1451,12 @@ if (!isImplicitlyConvertible!(S, T) &&
     (isNumeric!S || isSomeChar!S || isBoolean!S) &&
     (isNumeric!T || isSomeChar!T || isBoolean!T) && !is(T == enum))
 {
+    static if (isFloatingPoint!S && isIntegral!T)
+    {
+        import std.math : isNaN;
+        if (value.isNaN) throw new ConvException("Input was NaN");
+    }
+
     enum sSmallest = mostNegative!S;
     enum tSmallest = mostNegative!T;
     static if (sSmallest < 0)
@@ -1521,6 +1539,21 @@ if (!isImplicitlyConvertible!(S, T) &&
     assertThrown!ConvOverflowException(to!bool(E3.C));
     assert(to!bool(E3.D) == false);
 
+}
+
+@safe unittest
+{
+    import std.exception;
+    import std.math : isNaN;
+
+    double d = double.nan;
+    float f = to!float(d);
+    assert(f.isNaN);
+    assert(to!double(f).isNaN);
+    assertThrown!ConvException(to!int(d));
+    assertThrown!ConvException(to!int(f));
+    auto ex = collectException(d.to!int);
+    assert(ex.msg == "Input was NaN");
 }
 
 /**
@@ -2041,6 +2074,14 @@ template roundTo(Target)
         assertThrown!ConvOverflowException(roundTo!Int(Int.min - 0.5L));
         assertThrown!ConvOverflowException(roundTo!Int(Int.max + 0.5L));
     }
+}
+
+@safe unittest
+{
+    import std.exception;
+    assertThrown!ConvException(roundTo!int(float.init));
+    auto ex = collectException(roundTo!int(float.init));
+    assert(ex.msg == "Input was NaN");
 }
 
 /**
@@ -4076,7 +4117,7 @@ if (isOctalLiteral(num))
 
 /// Ditto
 template octal(alias decimalInteger)
-if (isIntegral!(typeof(decimalInteger)))
+if (is(typeof(decimalInteger)) && isIntegral!(typeof(decimalInteger)))
 {
     enum octal = octal!(typeof(decimalInteger))(to!string(decimalInteger));
 }

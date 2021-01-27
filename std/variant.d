@@ -100,7 +100,7 @@ template maxSize(T...)
 
 struct This;
 
-private alias This2Variant(V, T...) = AliasSeq!(ReplaceType!(This, V, T));
+private alias This2Variant(V, T...) = AliasSeq!(ReplaceTypeUnless!(isAlgebraic, This, V, T));
 
 // We can't just use maxAlignment because no types might be specified
 // to VariantN, so handle that here and then pass along the rest.
@@ -179,8 +179,6 @@ private:
             apply, postblit, destruct }
 
     // state
-    ptrdiff_t function(OpID selector, ubyte[size]* store, void* data) fptr
-        = &handler!(void);
     union
     {
         align(maxVariantAlignment!(AllowedTypes)) ubyte[size] store;
@@ -188,6 +186,8 @@ private:
         static if (size >= (void*).sizeof)
             void*[size / (void*).sizeof] p;
     }
+    ptrdiff_t function(OpID selector, ubyte[size]* store, void* data) fptr
+        = &handler!(void);
 
     // internals
     // Handler for an uninitialized value
@@ -285,7 +285,14 @@ private:
         static bool tryPutting(A* src, TypeInfo targetType, void* target)
         {
             alias UA = Unqual!A;
-            alias MutaTypes = AliasSeq!(UA, ImplicitConversionTargets!UA);
+            static if (isStaticArray!A && is(typeof(UA.init[0])))
+            {
+                alias MutaTypes = AliasSeq!(UA, typeof(UA.init[0])[], ImplicitConversionTargets!UA);
+            }
+            else
+            {
+                alias MutaTypes = AliasSeq!(UA, ImplicitConversionTargets!UA);
+            }
             alias ConstTypes = staticMap!(ConstOf, MutaTypes);
             alias SharedTypes = staticMap!(SharedOf, MutaTypes);
             alias SharedConstTypes = staticMap!(SharedConstOf, MutaTypes);
@@ -334,7 +341,15 @@ private:
                         static if (T.sizeof > 0)
                             assert(target, "target must be non-null");
 
-                        emplaceRef(*cast(Unqual!T*) zat, *cast(UA*) src);
+                        static if (isStaticArray!A && isDynamicArray!T)
+                        {
+                            auto this_ = (*src)[];
+                            emplaceRef(*cast(Unqual!T*) zat, cast(Unqual!T) this_);
+                        }
+                        else
+                        {
+                            emplaceRef(*cast(Unqual!T*) zat, *cast(UA*) src);
+                        }
                     }
                 }
                 else
@@ -624,7 +639,6 @@ public:
 
     VariantN opAssign(T)(T rhs)
     {
-        //writeln(typeid(rhs));
         static assert(allowed!(T), "Cannot store a " ~ T.stringof
             ~ " in a " ~ VariantN.stringof ~ ". Valid types are "
                 ~ AllowedTypes.stringof);
@@ -676,12 +690,14 @@ public:
                 }
                 else static if (is(T == U[n], U, size_t n))
                 {
-                    auto p = cast(T*)(new U[n]).ptr;
-                    *p = rhs;
+                    alias UT = Unqual!T;
+                    auto p = cast(UT*)(new U[n]).ptr;
+                    *p = cast(UT) rhs;
                 }
                 else
                 {
-                    auto p = new T;
+                    alias UT = Unqual!T;
+                    auto p = new UT;
                     *p = rhs;
                 }
                 memcpy(&store, &p, p.sizeof);
@@ -726,7 +742,7 @@ public:
     }
 
     ///
-    version (unittest)
+    version (StdDdoc)
     @system unittest
     {
         Variant a;
@@ -759,7 +775,7 @@ public:
     }
 
     ///
-    version (unittest)
+    version (StdDdoc)
     @system unittest
     {
         Variant a = 5;
@@ -1055,14 +1071,16 @@ public:
         is(typeof(opLogic!(T, op)(lhs))))
     { return opLogic!(T, op)(lhs); }
     ///ditto
-    VariantN opCat(T)(T rhs)
+    VariantN opBinary(string op, T)(T rhs)
+        if (op == "~")
     {
         auto temp = this;
         temp ~= rhs;
         return temp;
     }
     // ///ditto
-    // VariantN opCat_r(T)(T rhs)
+    // VariantN opBinaryRight(string op, T)(T rhs)
+    //     if (op == "~")
     // {
     //     VariantN temp = rhs;
     //     temp ~= this;
@@ -1097,7 +1115,7 @@ public:
     }
 
     ///
-    version (unittest)
+    version (StdDdoc)
     @system unittest
     {
         Variant a = new int[10];
@@ -1218,6 +1236,13 @@ public:
     assert(a.length == 42);
     a[5] = 7;
     assert(a[5] == 7);
+}
+
+@safe unittest
+{
+    alias V = VariantN!24;
+    const alignMask = V.alignof - 1;
+    assert(V.sizeof == ((24 + (void*).sizeof + alignMask) & ~alignMask));
 }
 
 /// Can also assign class values
@@ -1501,6 +1526,21 @@ pure nothrow @nogc
     }
 
     Algebraic!(SafeS) y;
+}
+
+// issue 19986
+@system unittest
+{
+    VariantN!32 v;
+    v = const(ubyte[33]).init;
+
+    struct S
+    {
+        ubyte[33] s;
+    }
+
+    VariantN!32 v2;
+    v2 = const(S).init;
 }
 
 /**
@@ -3004,4 +3044,43 @@ if (isAlgebraic!VariantType && Handler.length > 0)
     Variant v;
     auto b = v | s;
     assert(b == 3);
+}
+
+@system unittest
+{
+    // Bugzilla 11061
+    int[4] el = [0, 1, 2, 3];
+    int[3] nl = [0, 1, 2];
+    Variant v1 = el;
+    assert(v1 == el); // Compare Var(static) to static
+    assert(v1 != nl); // Compare static arrays of different length
+    assert(v1 == [0, 1, 2, 3]); // Compare Var(static) to dynamic.
+    assert(v1 != [0, 1, 2]);
+    int[] dyn = [0, 1, 2, 3];
+    v1 = dyn;
+    assert(v1 == el); // Compare Var(dynamic) to static.
+    assert(v1 == [0, 1] ~ [2, 3]); // Compare Var(dynamic) to dynamic
+}
+
+@system unittest
+{
+    // Test if we don't have scoping issues.
+    Variant createVariant(int[] input)
+    {
+        int[2] el = [input[0], input[1]];
+        Variant v = el;
+        return v;
+    }
+    Variant v = createVariant([0, 1]);
+    createVariant([2, 3]);
+    assert(v == [0,1]);
+}
+
+@safe unittest
+{
+    // Bugzilla 19994
+    alias Inner = Algebraic!(This*);
+    alias Outer = Algebraic!(Inner, This*);
+
+    static assert(is(Outer.AllowedTypes == AliasSeq!(Inner, Outer*)));
 }

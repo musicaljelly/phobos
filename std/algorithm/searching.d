@@ -102,12 +102,10 @@ T2=$(TR $(TDNW $(LREF $1)) $(TD $+))
  */
 module std.algorithm.searching;
 
-// FIXME
-import std.functional; // : unaryFun, binaryFun;
+import std.functional : unaryFun, binaryFun;
 import std.range.primitives;
 import std.traits;
-// FIXME
-import std.typecons; // : Tuple, Flag, Yes, No;
+import std.typecons : Tuple, Flag, Yes, No, tuple;
 
 /++
 Checks if $(I _all) of the elements verify `pred`.
@@ -153,6 +151,7 @@ are true.
 {
     int x = 1;
     assert(all!(a => a > x)([2, 3]));
+    assert(all!"a == 0x00c9"("\xc3\x89")); // Test that `all` auto-decodes.
 }
 
 /++
@@ -207,6 +206,7 @@ evaluate to true.
 {
     auto a = [ 1, 2, 0, 4 ];
     assert(any!"a == 2"(a));
+    assert(any!"a == 0x3000"("\xe3\x80\x80")); // Test that `any` auto-decodes.
 }
 
 // balancedParens
@@ -848,7 +848,8 @@ if (isForwardRange!R
     }
 
     //Because of @@@8804@@@: Avoids both "unreachable code" or "no return statement"
-    static if (isInfinite!R) assert(0);
+    static if (isInfinite!R) assert(false, R.stringof ~ " must not be an"
+            ~ " infinite range");
     else return -1;
 }
 
@@ -951,7 +952,8 @@ if (isInputRange!R &&
     }
 
     //Because of @@@8804@@@: Avoids both "unreachable code" or "no return statement"
-    static if (isInfinite!R) assert(0);
+    static if (isInfinite!R) assert(false, R.stringof ~ " must not be an"
+            ~ " inifite range");
     else return -1;
 }
 
@@ -1194,7 +1196,7 @@ if (isInputRange!R &&
     import std.meta : AliasSeq;
 
     static foreach (S; AliasSeq!(char[], wchar[], dchar[], string, wstring, dstring))
-    {
+    (){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
         assert(!endsWith(to!S("abc"), 'a'));
         assert(endsWith(to!S("abc"), 'a', 'c') == 2);
         assert(!endsWith(to!S("abc"), 'x', 'n', 'b'));
@@ -1233,7 +1235,7 @@ if (isInputRange!R &&
             assert(endsWith(to!S("a"), T.init, 'a') == 1);
             assert(endsWith(to!S("a"), 'a', T.init) == 2);
         }
-    }
+    }();
 
     static foreach (T; AliasSeq!(int, short))
     {{
@@ -1276,6 +1278,7 @@ private enum bool hasConstEmptyMember(T) = is(typeof(((const T* a) => (*a).empty
 // see: https://github.com/dlang/phobos/pull/6136
 private template RebindableOrUnqual(T)
 {
+    import std.typecons : Rebindable;
     static if (is(T == class) || is(T == interface) || isDynamicArray!T || isAssociativeArray!T)
         alias RebindableOrUnqual = Rebindable!T;
     else
@@ -2220,7 +2223,7 @@ private R1 simpleMindedFind(alias pred, R1, R2)(R1 haystack, scope R2 needle)
             }
             else
             {
-                assert(haystack.empty);
+                assert(haystack.empty, "Haystack must be empty by now");
                 return haystack;
             }
         }
@@ -2684,7 +2687,7 @@ InputRange findAmong(alias pred = "a == b", InputRange, ForwardRange)(
     InputRange seq, ForwardRange choices)
 if (isInputRange!InputRange && isForwardRange!ForwardRange)
 {
-    for (; !seq.empty && find!pred(choices, seq.front).empty; seq.popFront())
+    for (; !seq.empty && find!pred(choices.save, seq.front).empty; seq.popFront())
     {
     }
     return seq;
@@ -2706,6 +2709,14 @@ if (isInputRange!InputRange && isForwardRange!ForwardRange)
     assert(findAmong(b, [ 4, 6, 7 ][]).empty);
     assert(findAmong!("a == b")(a, b).length == a.length - 2);
     assert(findAmong!("a == b")(b, [ 4, 6, 7 ][]).empty);
+}
+
+@system unittest // issue 19765
+{
+    import std.range.interfaces : inputRangeObject;
+    auto choices = inputRangeObject("b");
+    auto f = "foobar".findAmong(choices);
+    assert(f == "bar");
 }
 
 // findSkip
@@ -3789,7 +3800,7 @@ irreflexive (`pred(a, a)` is `false`).
 Params:
     pred = The ordering predicate to use to determine the extremum (minimum or
         maximum) element.
-    range = The $(REF_ALTTEXT input range, isInputRange, std,range,primitives) to search.
+    range = The $(REF_ALTTEXT forward range, isForwardRange, std,range,primitives) to search.
 
 Returns: The position of the minimum (respectively maximum) element of forward
 range `range`, i.e. a subrange of `range` starting at the position of  its
@@ -3909,7 +3920,7 @@ See_Also:
     $(LREF maxIndex), $(REF min, std,algorithm,comparison), $(LREF minCount), $(LREF minElement), $(LREF minPos)
  */
 sizediff_t minIndex(alias pred = "a < b", Range)(Range range)
-if (isForwardRange!Range && !isInfinite!Range &&
+if (isInputRange!Range && !isInfinite!Range &&
     is(typeof(binaryFun!pred(range.front, range.front))))
 {
     if (range.empty) return -1;
@@ -4007,6 +4018,40 @@ if (isForwardRange!Range && !isInfinite!Range &&
 
     static immutable arr2d = [[1, 3], [3, 9], [4, 2]];
     assert(arr2d.minIndex!"a[1] < b[1]" == 2);
+}
+
+@safe nothrow pure unittest
+{
+    // InputRange test
+
+    static struct InRange
+    {
+        @property int front()
+        {
+            return arr[index];
+        }
+
+        bool empty() const
+        {
+            return arr.length == index;
+        }
+
+        void popFront()
+        {
+            index++;
+        }
+
+        int[] arr;
+        size_t index = 0;
+    }
+
+    static assert(isInputRange!InRange);
+
+    auto arr1 = InRange([5, 2, 3, 4, 5, 3, 6]);
+    auto arr2 = InRange([7, 3, 8, 2, 1, 4]);
+
+    assert(arr1.minIndex == 1);
+    assert(arr2.minIndex == 4);
 }
 
 /**
@@ -4741,7 +4786,7 @@ if (isInputRange!R &&
     import std.range;
 
     static foreach (S; AliasSeq!(char[], wchar[], dchar[], string, wstring, dstring))
-    {
+    (){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
         assert(!startsWith(to!S("abc"), 'c'));
         assert(startsWith(to!S("abc"), 'a', 'c') == 1);
         assert(!startsWith(to!S("abc"), 'x', 'n', 'b'));
@@ -4783,7 +4828,7 @@ if (isInputRange!R &&
             assert(startsWith(to!S("a"), T.init, 'a') == 1);
             assert(startsWith(to!S("a"), 'a', T.init) == 2);
         }
-    }
+    }();
 
     //Length but no RA
     assert(!startsWith("abc".takeExactly(3), "abcd".takeExactly(4)));
@@ -4913,6 +4958,7 @@ if (isInputRange!Range)
     private bool _done;
 
     static if (!is(Sentinel == void))
+    {
         ///
         this(Range input, Sentinel sentinel,
                 OpenRight openRight = Yes.openRight)
@@ -4922,7 +4968,17 @@ if (isInputRange!Range)
             _openRight = openRight;
             _done = _input.empty || openRight && predSatisfied();
         }
+        private this(Range input, Sentinel sentinel, OpenRight openRight,
+            bool done)
+        {
+            _input = input;
+            _sentinel = sentinel;
+            _openRight = openRight;
+            _done = done;
+        }
+    }
     else
+    {
         ///
         this(Range input, OpenRight openRight = Yes.openRight)
         {
@@ -4930,6 +4986,13 @@ if (isInputRange!Range)
             _openRight = openRight;
             _done = _input.empty || openRight && predSatisfied();
         }
+        private this(Range input, OpenRight openRight, bool done)
+        {
+            _input = input;
+            _openRight = openRight;
+            _done = done;
+        }
+    }
 
     ///
     @property bool empty()
@@ -4940,7 +5003,7 @@ if (isInputRange!Range)
     ///
     @property auto ref front()
     {
-        assert(!empty);
+        assert(!empty, "Can not get the front of an empty Until");
         return _input.front;
     }
 
@@ -4955,7 +5018,7 @@ if (isInputRange!Range)
     ///
     void popFront()
     {
-        assert(!empty);
+        assert(!empty, "Can not popFront of an empty Until");
         if (!_openRight)
         {
             _done = predSatisfied();
@@ -4971,27 +5034,14 @@ if (isInputRange!Range)
 
     static if (isForwardRange!Range)
     {
-        static if (!is(Sentinel == void))
-            ///
-            @property Until save()
-            {
-                Until result = this;
-                result._input     = _input.save;
-                result._sentinel  = _sentinel;
-                result._openRight = _openRight;
-                result._done      = _done;
-                return result;
-            }
-        else
-            ///
-            @property Until save()
-            {
-                Until result = this;
-                result._input     = _input.save;
-                result._openRight = _openRight;
-                result._done      = _done;
-                return result;
-            }
+        ///
+        @property Until save()
+        {
+            static if (is(Sentinel == void))
+                return Until(_input.save, _openRight, _done);
+            else
+                return Until(_input.save, _sentinel, _openRight, _done);
+        }
     }
 }
 
@@ -5042,4 +5092,20 @@ if (isInputRange!Range)
     import std.algorithm.comparison : among, equal;
     auto s = "hello how\nare you";
     assert(equal(s.until!(c => c.among!('\n', '\r')), "hello how"));
+}
+
+pure @safe unittest // issue 18657
+{
+    import std.algorithm.comparison : equal;
+    import std.range : refRange;
+    {
+        auto r = refRange(&["foobar"][0]).until("bar");
+        assert(equal(r.save, "foo"));
+        assert(equal(r.save, "foo"));
+    }
+    {
+        auto r = refRange(&["foobar"][0]).until!(e => e == 'b');
+        assert(equal(r.save, "foo"));
+        assert(equal(r.save, "foo"));
+    }
 }

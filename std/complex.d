@@ -146,7 +146,7 @@ if (isFloatingPoint!T)
     }
 
     /// ditto
-    void toString(Writer, Char)(scope Writer w, const ref FormatSpec!Char formatSpec) const
+    void toString(Writer, Char)(scope Writer w, scope const ref FormatSpec!Char formatSpec) const
         if (isOutputRange!(Writer, const(Char)[]))
     {
         import std.format : formatValue;
@@ -998,6 +998,7 @@ Complex!T sqrt(T)(Complex!T z)  @safe pure nothrow @nogc
     assert(sqrt(complex(0.0)) == 0.0);
     assert(sqrt(complex(1.0L, 0)) == std.math.sqrt(1.0L));
     assert(sqrt(complex(-1.0L, 0)) == complex(0, 1.0L));
+    assert(sqrt(complex(-8.0, -6.0)) == complex(1.0, -3.0));
 }
 
 @safe pure nothrow unittest

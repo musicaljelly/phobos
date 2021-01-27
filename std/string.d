@@ -175,13 +175,13 @@ public import std.format : format, sformat;
 import std.typecons : Flag, Yes, No;
 public import std.uni : icmp, toLower, toLowerInPlace, toUpper, toUpperInPlace;
 
-import std.meta; // AliasSeq, staticIndexOf
-import std.range.primitives; // back, ElementEncodingType, ElementType, front,
-    // hasLength, hasSlicing, isBidirectionalRange, isForwardRange, isInfinite,
-    // isInputRange, isOutputRange, isRandomAccessRange, popBack, popFront, put,
-    // save;
-import std.traits; // isConvertibleToString, isNarrowString, isSomeChar,
-    // isSomeString, StringTypeOf, Unqual
+import std.meta : AliasSeq, staticIndexOf;
+import std.range.primitives : back, ElementEncodingType, ElementType, front,
+    hasLength, hasSlicing, isBidirectionalRange, isForwardRange, isInfinite,
+    isInputRange, isOutputRange, isRandomAccessRange, popBack, popFront, put,
+    save;
+import std.traits : isConvertibleToString, isNarrowString, isSomeChar,
+    isSomeString, StringTypeOf, Unqual;
 
 //public imports for backward compatibility
 public import std.algorithm.comparison : cmp;
@@ -316,8 +316,10 @@ out (result)
     {
         auto slen = s.length;
         while (slen > 0 && s[slen-1] == 0) --slen;
-        assert(strlen(result) == slen);
-        assert(result[0 .. slen] == s[0 .. slen]);
+        assert(strlen(result) == slen,
+                "The result c string is shorter than the in input string");
+        assert(result[0 .. slen] == s[0 .. slen],
+                "The input and result string are not equal");
     }
 }
 do
@@ -2800,7 +2802,7 @@ public:
     {
         if (iStart == _unComputed)
         {
-            assert(!empty);
+            assert(!empty, "Can not popFront an empty range");
             front;
         }
         iStart = _unComputed;
@@ -2997,6 +2999,7 @@ auto stripLeft(Range)(Range input)
 if (isForwardRange!Range && isSomeChar!(ElementEncodingType!Range) &&
     !isInfinite!Range && !isConvertibleToString!Range)
 {
+    import std.traits : isDynamicArray;
     static import std.ascii;
     static import std.uni;
 
@@ -3196,6 +3199,7 @@ if (isSomeString!Range ||
     !isConvertibleToString!Range &&
     isSomeChar!(ElementEncodingType!Range))
 {
+    import std.traits : isDynamicArray;
     import std.uni : isWhite;
     alias C = Unqual!(ElementEncodingType!(typeof(str)));
 
@@ -4306,7 +4310,7 @@ if (isForwardRange!Range && isSomeChar!(ElementEncodingType!Range) &&
             {
                 // Replace _width with nfill
                 // (use alias instead of union because CTFE cannot deal with unions)
-                assert(_width);
+                assert(_width, "width of 0 not allowed");
                 static if (hasLength!Range)
                 {
                     immutable len = _input.length;
@@ -4370,7 +4374,7 @@ if (isForwardRange!Range && isSomeChar!(ElementEncodingType!Range) &&
         return Result(r, width, fillChar);
     }
     else
-        static assert(0);
+        static assert(0, "Invalid character type of " ~ C.stringof);
 }
 
 ///
@@ -4891,7 +4895,7 @@ if (isForwardRange!Range && !isConvertibleToString!Range)
     import std.uni : lineSep, paraSep, nelSep;
     import std.utf : codeUnitLimit, decodeFront;
 
-    assert(tabSize > 0);
+    assert(tabSize > 0, "tabSize must be greater than 0");
     alias C = Unqual!(ElementEncodingType!Range);
 
     static struct Result
@@ -4979,7 +4983,8 @@ if (isForwardRange!Range && !isConvertibleToString!Range)
                     {
                         while (1)
                         {
-                            assert(_input.length);
+                            assert(_input.length, "input did not contain non "
+                                    ~ "whitespace character");
                             cx = _input[0];
                             if (cx == ' ')
                                 ++column;
@@ -4994,7 +4999,8 @@ if (isForwardRange!Range && !isConvertibleToString!Range)
                     {
                         while (1)
                         {
-                            assert(!_input.empty);
+                            assert(_input.length, "input did not contain non "
+                                    ~ "whitespace character");
                             cx = _input.front;
                             if (cx == ' ')
                                 ++column;
@@ -5249,7 +5255,7 @@ if (isSomeChar!C1 && isSomeChar!C2)
     static foreach (S; AliasSeq!( char[], const( char)[], immutable( char)[],
                           wchar[], const(wchar)[], immutable(wchar)[],
                           dchar[], const(dchar)[], immutable(dchar)[]))
-    {{
+    {(){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
         assert(translate(to!S("hello world"), cast(dchar[dchar])['h' : 'q', 'l' : '5']) ==
                to!S("qe55o wor5d"));
         assert(translate(to!S("hello world"), cast(dchar[dchar])['o' : 'l', 'l' : '\U00010143']) ==
@@ -5263,7 +5269,7 @@ if (isSomeChar!C1 && isSomeChar!C2)
         static foreach (T; AliasSeq!( char[], const( char)[], immutable( char)[],
                               wchar[], const(wchar)[], immutable(wchar)[],
                               dchar[], const(dchar)[], immutable(dchar)[]))
-        {
+        (){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
             static foreach (R; AliasSeq!(dchar[dchar], const dchar[dchar],
                         immutable dchar[dchar]))
             {{
@@ -5275,13 +5281,13 @@ if (isSomeChar!C1 && isSomeChar!C2)
                 assert(translate(to!S("hello world"), tt, to!T("q5"))
                     == to!S("qe55o wor5d"));
             }}
-        }
+        }();
 
         auto s = to!S("hello world");
         dchar[dchar] transTable = ['h' : 'q', 'l' : '5'];
         static assert(is(typeof(s) == typeof(translate(s, transTable))));
         assert(translate(s, transTable) == "qe55o wor5d");
-    }}
+    }();}
     });
 }
 
@@ -5307,7 +5313,7 @@ if (isSomeChar!C1 && isSomeString!S && isSomeChar!C2)
     static foreach (S; AliasSeq!( char[], const( char)[], immutable( char)[],
                           wchar[], const(wchar)[], immutable(wchar)[],
                           dchar[], const(dchar)[], immutable(dchar)[]))
-    {{
+    {(){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
         assert(translate(to!S("hello world"), ['h' : "yellow", 'l' : "42"]) ==
                to!S("yellowe4242o wor42d"));
         assert(translate(to!S("hello world"), ['o' : "owl", 'l' : "\U00010143\U00010143"]) ==
@@ -5325,7 +5331,7 @@ if (isSomeChar!C1 && isSomeString!S && isSomeChar!C2)
         static foreach (T; AliasSeq!( char[], const( char)[], immutable( char)[],
                               wchar[], const(wchar)[], immutable(wchar)[],
                               dchar[], const(dchar)[], immutable(dchar)[]))
-        {
+        (){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
 
             static foreach (R; AliasSeq!(string[dchar], const string[dchar],
                         immutable string[dchar]))
@@ -5342,13 +5348,13 @@ if (isSomeChar!C1 && isSomeString!S && isSomeChar!C2)
                 assert(translate(to!S("hello world"), tt, to!T("42")) ==
                        to!S("yellowe4242o wor42d"));
             }}
-        }
+        }();
 
         auto s = to!S("hello world");
         string[dchar] transTable = ['h' : "silly", 'l' : "putty"];
         static assert(is(typeof(s) == typeof(translate(s, transTable))));
         assert(translate(s, transTable) == "sillyeputtyputtyo worputtyd");
-    }}
+    }();}
     });
 }
 
@@ -5481,7 +5487,9 @@ C[] translate(C = immutable char)(scope const(char)[] str, scope const(char)[] t
 if (is(Unqual!C == char))
 in
 {
-    assert(transTable.length == 256);
+    import std.conv : to;
+    assert(transTable.length == 256, "transTable had invalid length of " ~
+            to!string(transTable.length));
 }
 do
 {
@@ -5552,12 +5560,14 @@ char[256] makeTransTable(scope const(char)[] from, scope const(char)[] to) @safe
 in
 {
     import std.ascii : isASCII;
-    assert(from.length == to.length);
-    assert(from.length <= 256);
+    assert(from.length == to.length, "from.length must match to.length");
+    assert(from.length <= 256, "from.length must be <= 256");
     foreach (char c; from)
-        assert(isASCII(c));
+        assert(isASCII(c),
+                "all characters in from must be valid ascii character");
     foreach (char c; to)
-        assert(isASCII(c));
+        assert(isASCII(c),
+                "all characters in to must be valid ascii character");
 }
 do
 {
@@ -5635,7 +5645,8 @@ void translate(C = immutable char, Buffer)(scope const(char)[] str, scope const(
 if (is(Unqual!C == char) && isOutputRange!(Buffer, char))
 in
 {
-    assert(transTable.length == 256);
+    assert(transTable.length == 256, format!
+            "transTable.length %s must equal 256"(transTable.length));
 }
 do
 {
@@ -6074,7 +6085,8 @@ C1[] tr(C1, C2, C3, C4 = immutable char)
         case 'c':   mod_c = 1; break;   // complement
         case 'd':   mod_d = 1; break;   // delete unreplaced chars
         case 's':   mod_s = 1; break;   // squeeze duplicated replaced chars
-        default:    assert(0);
+        default:    assert(false, "modifier must be one of ['c', 'd', 's'] not "
+                            ~ c);
         }
     }
 
@@ -6157,7 +6169,7 @@ C1[] tr(C1, C2, C3, C4 = immutable char)
         if (mod_s && modified && newc == lastc)
             continue;
         result.put(newc);
-        assert(newc != dchar.init);
+        assert(newc != dchar.init, "character must not be dchar.init");
         modified = true;
         lastc = newc;
         continue;
@@ -6686,10 +6698,12 @@ out (result)
 {
     if (result !is null)
     {
-        assert(result.length == 4);
-        assert(result[0] >= 'A' && result[0] <= 'Z');
+        assert(result.length == 4, "Result must have length of 4");
+        assert(result[0] >= 'A' && result[0] <= 'Z', "The first character of "
+                ~ " the result must be an upper character not " ~ result);
         foreach (char c; result[1 .. 4])
-            assert(c >= '0' && c <= '6');
+            assert(c >= '0' && c <= '6', "the last three character of the"
+                    ~ " result must be number between 0 and 6 not " ~ result);
     }
 }
 do

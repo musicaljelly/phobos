@@ -111,8 +111,12 @@ if (Targets.length >= 1 && allSatisfy!(isMutable, Targets))
             else
             {
                 enum foundFunc = findCovariantFunction!(TargetMembers[i], Source, SourceMembers);
-                static if (foundFunc == -1)
-                    pragma(msg, "Could not locate matching function for: " ~ TargetMembers[i].stringof);
+                debug
+                {
+                    static if (foundFunc == -1)
+                        pragma(msg, "Could not locate matching function for: ",
+                               TargetMembers[i].stringof);
+                }
                 enum hasRequiredMethods =
                     foundFunc != -1 &&
                     hasRequiredMethods!(i + 1);
@@ -973,9 +977,6 @@ pure nothrow @safe unittest
 
     Final!A a = new A;
     static assert(!__traits(compiles, a = new A));
-
-    static void foo(ref A a) pure nothrow @safe @nogc {}
-    static assert(!__traits(compiles, foo(a)));
 
     assert(a.i == 0);
     a.i = 42;

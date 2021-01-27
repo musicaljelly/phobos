@@ -61,6 +61,9 @@ $(TR $(TH Function Name) $(TH Description)
     $(TR $(TD $(LREF split))
         $(TD Eagerly split a range or string into an array.
     ))
+    $(TR $(TD $(LREF staticArray))
+        $(TD Creates a new static array from given data.
+    ))
     $(TR $(TD $(LREF uninitializedArray))
         $(TD Returns a new array of type `T` without initializing its elements.
     ))
@@ -439,7 +442,8 @@ if (isInputRange!Range)
     import std.typecons : isTuple;
 
     alias E = ElementType!Range;
-    static assert(isTuple!E, "assocArray: argument must be a range of tuples");
+    static assert(isTuple!E, "assocArray: argument must be a range of tuples,"
+        ~" but was a range of "~E.stringof);
     static assert(E.length == 2, "assocArray: tuple dimension must be 2");
     alias KeyType = E.Types[0];
     alias ValueType = E.Types[1];
@@ -474,7 +478,7 @@ if (isInputRange!Values && isInputRange!Keys)
                     ValueElement.init.__xdtor();
             })))
             {
-                scope(failure) assert(0);
+                scope(failure) assert(false, "aaLiteral must not throw");
             }
             if (values.length > keys.length)
                 values = values[0 .. keys.length];
@@ -549,6 +553,7 @@ if (isInputRange!Values && isInputRange!Keys)
 @safe unittest
 {
     import std.typecons;
+    static assert(!__traits(compiles, [ 1, 2, 3 ].assocArray()));
     static assert(!__traits(compiles, [ tuple("foo", "bar", "baz") ].assocArray()));
     static assert(!__traits(compiles, [ tuple("foo") ].assocArray()));
     assert([ tuple("foo", "bar") ].assocArray() == ["foo": "bar"]);
@@ -906,7 +911,8 @@ private auto arrayAllocImpl(bool minimallyInitialized, T, I...)(I sizes) nothrow
 
     static if (I.length != 0)
     {
-        static assert(is(I[0] == size_t));
+        static assert(is(I[0] == size_t), "I[0] must be of type size_t not "
+                ~ I[0].stringof);
         alias size = sizes[0];
     }
 
@@ -1147,8 +1153,10 @@ if (is(typeof(a.ptr < b.ptr) == bool))
 private void copyBackwards(T)(T[] src, T[] dest)
 {
     import core.stdc.string : memmove;
+    import std.format : format;
 
-    assert(src.length == dest.length);
+    assert(src.length == dest.length, format!
+            "src.length %s must equal dest.length %s"(src.length, dest.length));
 
     if (!__ctfe || hasElaborateCopyConstructor!T)
     {
@@ -1287,7 +1295,8 @@ if (isSomeString!(T[]) && allSatisfy!(isCharOrStringOrDcharRange, U))
 
         @trusted static void moveToRight(T[] arr, size_t gap)
         {
-            static assert(!hasElaborateCopyConstructor!T);
+            static assert(!hasElaborateCopyConstructor!T,
+                    "T must not have an elaborate copy constructor");
             import core.stdc.string : memmove;
             if (__ctfe)
             {
@@ -2015,6 +2024,7 @@ if (isInputRange!RoR &&
         else
         {
             import std.conv : emplaceRef;
+            import std.format : format;
             size_t length;
             size_t rorLength;
             foreach (r; ror.save)
@@ -2038,7 +2048,8 @@ if (isInputRange!RoR &&
                 foreach (e; r)
                     emplaceRef(result[len++], e);
             }
-            assert(len == result.length);
+            assert(len == result.length, format!
+                    "len %s must equal result.lenght %s"(len, result.length));
             return (() @trusted => cast(RetType) result)();
         }
     }
@@ -2109,7 +2120,8 @@ if (isInputRange!RoR &&
         foreach (r; ror)
             foreach (e; r)
                 emplaceRef!RetTypeElement(result[len++], e);
-        assert(len == result.length);
+        assert(len == result.length,
+                "emplaced an unexpected number of elements");
         return (() @trusted => cast(RetType) result)();
     }
     else
@@ -2581,7 +2593,7 @@ if (isInputRange!Range &&
     static if (hasLength!Range && is(ElementEncodingType!Range : T))
     {
         import std.algorithm.mutation : copy;
-        assert(from <= to);
+        assert(from <= to, "from must be before or equal to to");
         immutable sliceLen = to - from;
         auto retval = new Unqual!(T)[](subject.length - sliceLen + stuff.length);
         retval[0 .. from] = subject[0 .. from];
@@ -3132,7 +3144,7 @@ inout(T)[] replaceSlice(T)(inout(T)[] s, in T[] slice, in T[] replacement)
 in
 {
     // Verify that slice[] really is a slice of s[]
-    assert(overlap(s, slice) is slice);
+    assert(overlap(s, slice) is slice, "slice[] is not a subslice of s[]");
 }
 do
 {
@@ -3259,9 +3271,18 @@ if (isDynamicArray!A)
     }
 
     /**
+     * Use opSlice() from now on.
      * Returns: The managed array.
      */
     @property inout(ElementEncodingType!A)[] data() inout @trusted pure nothrow
+    {
+        return this[];
+    }
+
+    /**
+     * Returns: The managed array.
+     */
+    @property inout(ElementEncodingType!A)[] opSlice() inout @trusted pure nothrow
     {
         /* @trusted operation:
          * casting Unqual!T[] to inout(T)[]
@@ -3320,7 +3341,8 @@ if (isDynamicArray!A)
             import core.checkedint : mulu;
             bool overflow;
             const nbytes = mulu(newlen, T.sizeof, overflow);
-            if (overflow) assert(0);
+            if (overflow) assert(false, "the reallocation would exceed the "
+                    ~ "available pointer range");
 
             auto bi = (() @trusted => GC.qalloc(nbytes, blockAttribute!T))();
             _data.capacity = bi.size / T.sizeof;
@@ -3336,7 +3358,7 @@ if (isDynamicArray!A)
     private template canPutItem(U)
     {
         enum bool canPutItem =
-            isImplicitlyConvertible!(U, T) ||
+            isImplicitlyConvertible!(Unqual!U, Unqual!T) ||
             isSomeChar!T && isSomeChar!U;
     }
     private template canPutConstRange(Range)
@@ -3381,7 +3403,7 @@ if (isDynamicArray!A)
             immutable len = _data.arr.length;
 
             auto bigData = (() @trusted => _data.arr.ptr[0 .. len + 1])();
-            emplaceRef!(Unqual!T)(bigData[len], cast(Unqual!T) item);
+            emplaceRef!(Unqual!T)(bigData[len], cast() item);
             //We do this at the end, in case of exceptions
             _data.arr = bigData;
         }
@@ -3464,16 +3486,11 @@ if (isDynamicArray!A)
     }
 
     /**
-     * Appends `rhs` to the managed array.
-     * Params:
-     *     op = the assignment operator `~`
-     *     rhs = Element or range.
+     * Appends to the managed array.
+     *
+     * See_Also: $(LREF Appender.put)
      */
-    void opOpAssign(string op : "~", U)(U rhs)
-    if (__traits(compiles, put(rhs)))
-    {
-        put(rhs);
-    }
+    alias opOpAssign(string op : "~") = put;
 
     // only allow overwriting data on non-immutable and non-const data
     static if (isMutable!T)
@@ -3546,7 +3563,7 @@ if (isDynamicArray!A)
     }
 
     /// ditto
-    void toString(Writer)(ref Writer w, const ref FormatSpec!char fmt) const
+    void toString(Writer)(ref Writer w, scope const ref FormatSpec!char fmt) const
     if (isOutputRange!(Writer, char))
     {
         import std.format : formatValue;
@@ -3574,13 +3591,13 @@ if (isDynamicArray!A)
     string b = "abcdefg";
     foreach (char c; b)
         app.put(c);
-    assert(app.data == "abcdefg");
+    assert(app[] == "abcdefg");
 
     int[] a = [ 1, 2 ];
     auto app2 = appender(a);
     app2.put(3);
     app2.put([ 4, 5, 6 ]);
-    assert(app2.data == [ 1, 2, 3, 4, 5, 6 ]);
+    assert(app2[] == [ 1, 2, 3, 4, 5, 6 ]);
 }
 
 @safe pure unittest
@@ -3596,12 +3613,12 @@ if (isDynamicArray!A)
     auto app2 = appender!string();
     auto spec = singleSpec("%s");
     app.toString(app2, spec);
-    assert(app2.data == "Appender!(int[])([1, 2, 3])");
+    assert(app2[] == "Appender!(int[])([1, 2, 3])");
 
     auto app3 = appender!string();
     spec = singleSpec("%(%04d, %)");
     app.toString(app3, spec);
-    assert(app3.data == "Appender!(int[])(0001, 0002, 0003)");
+    assert(app3[] == "Appender!(int[])(0001, 0002, 0003)");
 }
 
 @safe unittest // issue 17251
@@ -3652,6 +3669,26 @@ if (isDynamicArray!A)
 
     static assert(__traits(compiles, () pure { test!true(); }));
     static assert(!__traits(compiles, () pure { test!false(); }));
+}
+
+@system unittest // issue 19572
+{
+    static struct Struct
+    {
+        int value;
+
+        int fun() const { return 23; }
+
+        alias fun this;
+    }
+
+    Appender!(Struct[]) appender;
+
+    appender.put(const(Struct)(42));
+
+    auto result = appender[][0];
+
+    assert(result.value != 23);
 }
 
 //Calculates an efficient growth scheme based on the old capacity
@@ -3720,7 +3757,7 @@ if (isDynamicArray!A)
     if (__traits(compiles, (Appender!A a) => mixin("a." ~ fn ~ "(args)")))
     {
         // we do it this way because we can't cache a void return
-        scope(exit) *this.arr = impl.data;
+        scope(exit) *this.arr = impl[];
         mixin("return impl." ~ fn ~ "(args);");
     }
 
@@ -3732,7 +3769,7 @@ if (isDynamicArray!A)
     void opOpAssign(string op : "~", U)(U rhs)
     if (__traits(compiles, (Appender!A a){ a.put(rhs); }))
     {
-        scope(exit) *this.arr = impl.data;
+        scope(exit) *this.arr = impl[];
         impl.put(rhs);
     }
 
@@ -3746,12 +3783,20 @@ if (isDynamicArray!A)
         return impl.capacity;
     }
 
-    /**
-     * Returns the managed array.
+    /* Use opSlice() instead.
+     * Returns: the managed array.
      */
     @property inout(ElementEncodingType!A)[] data() inout
     {
-        return impl.data;
+        return impl[];
+    }
+
+    /**
+     * Returns: the managed array.
+     */
+    @property inout(ElementEncodingType!A)[] opSlice() inout
+    {
+        return impl[];
     }
 }
 
@@ -3761,11 +3806,11 @@ unittest
 {
     int[] a = [1, 2];
     auto app2 = appender(&a);
-    assert(app2.data == [1, 2]);
+    assert(app2[] == [1, 2]);
     assert(a == [1, 2]);
     app2 ~= 3;
     app2 ~= [4, 5, 6];
-    assert(app2.data == [1, 2, 3, 4, 5, 6]);
+    assert(app2[] == [1, 2, 3, 4, 5, 6]);
     assert(a == [1, 2, 3, 4, 5, 6]);
 
     app2.reserve(5);
@@ -3797,33 +3842,33 @@ Appender!(E[]) appender(A : E[], E)(auto ref A array)
         auto app = appender!(char[])();
         string b = "abcdefg";
         foreach (char c; b) app.put(c);
-        assert(app.data == "abcdefg");
+        assert(app[] == "abcdefg");
     }
     {
         auto app = appender!(char[])();
         string b = "abcdefg";
         foreach (char c; b) app ~= c;
-        assert(app.data == "abcdefg");
+        assert(app[] == "abcdefg");
     }
     {
         int[] a = [ 1, 2 ];
         auto app2 = appender(a);
-        assert(app2.data == [ 1, 2 ]);
+        assert(app2[] == [ 1, 2 ]);
         app2.put(3);
         app2.put([ 4, 5, 6 ][]);
-        assert(app2.data == [ 1, 2, 3, 4, 5, 6 ]);
+        assert(app2[] == [ 1, 2, 3, 4, 5, 6 ]);
         app2.put([ 7 ]);
-        assert(app2.data == [ 1, 2, 3, 4, 5, 6, 7 ]);
+        assert(app2[] == [ 1, 2, 3, 4, 5, 6, 7 ]);
     }
 
     int[] a = [ 1, 2 ];
     auto app2 = appender(a);
-    assert(app2.data == [ 1, 2 ]);
+    assert(app2[] == [ 1, 2 ]);
     app2 ~= 3;
     app2 ~= [ 4, 5, 6 ][];
-    assert(app2.data == [ 1, 2, 3, 4, 5, 6 ]);
+    assert(app2[] == [ 1, 2, 3, 4, 5, 6 ]);
     app2 ~= [ 7 ];
-    assert(app2.data == [ 1, 2, 3, 4, 5, 6, 7 ]);
+    assert(app2[] == [ 1, 2, 3, 4, 5, 6, 7 ]);
 
     app2.reserve(5);
     assert(app2.capacity >= 5);
@@ -3833,12 +3878,12 @@ Appender!(E[]) appender(A : E[], E)(auto ref A array)
         app2.shrinkTo(3);
     }
     catch (Exception) assert(0);
-    assert(app2.data == [ 1, 2, 3 ]);
+    assert(app2[] == [ 1, 2, 3 ]);
     assertThrown(app2.shrinkTo(5));
 
     const app3 = app2;
     assert(app3.capacity >= 3);
-    assert(app3.data == [1, 2, 3]);
+    assert(app3[] == [1, 2, 3]);
 
     auto app4 = appender([]);
     try // shrinkTo may throw
@@ -3853,29 +3898,29 @@ Appender!(E[]) appender(A : E[], E)(auto ref A array)
         {
             Appender!S app5663i;
             assertNotThrown(app5663i.put("\xE3"));
-            assert(app5663i.data == "\xE3");
+            assert(app5663i[] == "\xE3");
 
             Appender!S app5663c;
             assertNotThrown(app5663c.put(cast(const(char)[])"\xE3"));
-            assert(app5663c.data == "\xE3");
+            assert(app5663c[] == "\xE3");
 
             Appender!S app5663m;
             assertNotThrown(app5663m.put("\xE3".dup));
-            assert(app5663m.data == "\xE3");
+            assert(app5663m[] == "\xE3");
         }
         // ditto for ~=
         {
             Appender!S app5663i;
             assertNotThrown(app5663i ~= "\xE3");
-            assert(app5663i.data == "\xE3");
+            assert(app5663i[] == "\xE3");
 
             Appender!S app5663c;
             assertNotThrown(app5663c ~= cast(const(char)[])"\xE3");
-            assert(app5663c.data == "\xE3");
+            assert(app5663c[] == "\xE3");
 
             Appender!S app5663m;
             assertNotThrown(app5663m ~= "\xE3".dup);
-            assert(app5663m.data == "\xE3");
+            assert(app5663m[] == "\xE3");
         }
     }
 
@@ -3890,7 +3935,7 @@ Appender!(E[]) appender(A : E[], E)(auto ref A array)
     {
         auto w = appender!(S10122[])();
         w.put(S10122(1));
-        assert(w.data.length == 1 && w.data[0].val == 1);
+        assert(w[].length == 1 && w[][0].val == 1);
     });
 }
 
@@ -3910,7 +3955,7 @@ unittest
     w ~= 'd';
     w ~= "ef";
 
-    assert(w.data == "abcdef");
+    assert(w[] == "abcdef");
 }
 
 @safe pure nothrow unittest
@@ -3919,7 +3964,7 @@ unittest
         auto w = appender!string();
         w.reserve(4);
         cast(void) w.capacity;
-        cast(void) w.data;
+        cast(void) w[];
         try
         {
             wchar wc = 'a';
@@ -3933,7 +3978,7 @@ unittest
         auto w = appender!(int[])();
         w.reserve(4);
         cast(void) w.capacity;
-        cast(void) w.data;
+        cast(void) w[];
         w.put(10);
         w.put([10]);
         w.clear();
@@ -4043,7 +4088,7 @@ unittest
             auto app = appender!(const(E)[])();
             foreach (i, e; src)
                     app.put(e);
-            return app.data;
+            return app[];
     }
 
     class C {}
@@ -4083,26 +4128,26 @@ unittest
 
     auto app1 = Appender!mutARR(mut);                //Always worked. Should work. Should not create a warning.
     app1.put(7);
-    assert(equal(app1.data, [7]));
+    assert(equal(app1[], [7]));
     static assert(!is(typeof(Appender!mutARR(con)))); //Never worked.  Should not work.
     static assert(!is(typeof(Appender!mutARR(imm)))); //Never worked.  Should not work.
 
     auto app2 = Appender!conARR(mut); //Always worked. Should work. Should not create a warning.
     app2.put(7);
-    assert(equal(app2.data, [7]));
+    assert(equal(app2[], [7]));
     auto app3 = Appender!conARR(con); //Didn't work.   Now works.   Should not create a warning.
     app3.put(7);
-    assert(equal(app3.data, [7]));
+    assert(equal(app3[], [7]));
     auto app4 = Appender!conARR(imm); //Didn't work.   Now works.   Should not create a warning.
     app4.put(7);
-    assert(equal(app4.data, [7]));
+    assert(equal(app4[], [7]));
 
     //{auto app = Appender!immARR(mut);}                //Worked. Will cease to work. Creates warning.
     //static assert(!is(typeof(Appender!immARR(mut)))); //Worked. Will cease to work. Uncomment me after full deprecation.
     static assert(!is(typeof(Appender!immARR(con))));   //Never worked. Should not work.
     auto app5 = Appender!immARR(imm);                  //Didn't work.  Now works. Should not create a warning.
     app5.put(7);
-    assert(equal(app5.data, [7]));
+    assert(equal(app5[], [7]));
 
     //Deprecated. Please uncomment and make sure this doesn't work:
     //char[] cc;
@@ -4110,11 +4155,11 @@ unittest
 
     //This should always work:
     auto app6 = appender!string(null);
-    assert(app6.data == null);
+    assert(app6[] == null);
     auto app7 = appender!(const(char)[])(null);
-    assert(app7.data == null);
+    assert(app7[] == null);
     auto app8 = appender!(char[])(null);
-    assert(app8.data == null);
+    assert(app8[] == null);
 }
 
 @safe unittest //Test large allocations (for GC.extend)
@@ -4125,7 +4170,7 @@ unittest
     app.reserve(1); //cover reserve on non-initialized
     foreach (_; 0 .. 100_000)
         app.put('a');
-    assert(equal(app.data, 'a'.repeat(100_000)));
+    assert(equal(app[], 'a'.repeat(100_000)));
 }
 
 @safe unittest
@@ -4143,7 +4188,7 @@ unittest
     Appender!string app;
     app.put("foo");
     static assert(!__traits(compiles, app.clear()));
-    assert(app.data == "foo");
+    assert(app[] == "foo");
 }
 
 @safe unittest
@@ -4210,11 +4255,11 @@ unittest
 {
     int[] a = [1, 2];
     auto app2 = appender(&a);
-    assert(app2.data == [1, 2]);
+    assert(app2[] == [1, 2]);
     assert(a == [1, 2]);
     app2 ~= 3;
     app2 ~= [4, 5, 6];
-    assert(app2.data == [1, 2, 3, 4, 5, 6]);
+    assert(app2[] == [1, 2, 3, 4, 5, 6]);
     assert(a == [1, 2, 3, 4, 5, 6]);
 
     app2.reserve(5);
@@ -4229,7 +4274,7 @@ unittest
         auto app = appender(&arr);
         string b = "abcdefg";
         foreach (char c; b) app.put(c);
-        assert(app.data == "abcdefg");
+        assert(app[] == "abcdefg");
         assert(arr == "abcdefg");
     }
     {
@@ -4237,27 +4282,27 @@ unittest
         auto app = appender(&arr);
         string b = "abcdefg";
         foreach (char c; b) app ~= c;
-        assert(app.data == "abcdefg");
+        assert(app[] == "abcdefg");
         assert(arr == "abcdefg");
     }
     {
         int[] a = [ 1, 2 ];
         auto app2 = appender(&a);
-        assert(app2.data == [ 1, 2 ]);
+        assert(app2[] == [ 1, 2 ]);
         assert(a == [ 1, 2 ]);
         app2.put(3);
         app2.put([ 4, 5, 6 ][]);
-        assert(app2.data == [ 1, 2, 3, 4, 5, 6 ]);
+        assert(app2[] == [ 1, 2, 3, 4, 5, 6 ]);
         assert(a == [ 1, 2, 3, 4, 5, 6 ]);
     }
 
     int[] a = [ 1, 2 ];
     auto app2 = appender(&a);
-    assert(app2.data == [ 1, 2 ]);
+    assert(app2[] == [ 1, 2 ]);
     assert(a == [ 1, 2 ]);
     app2 ~= 3;
     app2 ~= [ 4, 5, 6 ][];
-    assert(app2.data == [ 1, 2, 3, 4, 5, 6 ]);
+    assert(app2[] == [ 1, 2, 3, 4, 5, 6 ]);
     assert(a == [ 1, 2, 3, 4, 5, 6 ]);
 
     app2.reserve(5);
@@ -4268,12 +4313,12 @@ unittest
         app2.shrinkTo(3);
     }
     catch (Exception) assert(0);
-    assert(app2.data == [ 1, 2, 3 ]);
+    assert(app2[] == [ 1, 2, 3 ]);
     assertThrown(app2.shrinkTo(5));
 
     const app3 = app2;
     assert(app3.capacity >= 3);
-    assert(app3.data == [1, 2, 3]);
+    assert(app3[] == [1, 2, 3]);
 }
 
 @safe unittest // issue 14605
@@ -4287,7 +4332,7 @@ unittest
     Appender!(int[]) app;
     short[] range = [1, 2, 3];
     app.put(range);
-    assert(app.data == [1, 2, 3]);
+    assert(app[] == [1, 2, 3]);
 }
 
 @safe unittest
@@ -4300,8 +4345,8 @@ unittest
     put(appA, 'w');
     s ~= 'a'; //Clobbers here?
     a ~= 'a'; //Clobbers here?
-    assert(appS.data == "hellow");
-    assert(appA.data == "hellow");
+    assert(appS[] == "hellow");
+    assert(appA[] == "hellow");
 }
 
 /++
@@ -4568,5 +4613,5 @@ nothrow pure @safe unittest
 version (unittest) private void checkStaticArray(T, T1, T2)(T1 a, T2 b) nothrow @safe pure @nogc
 {
     static assert(is(T1 == T[T1.length]));
-    assert(a == b);
+    assert(a == b, "a must be equal to b");
 }

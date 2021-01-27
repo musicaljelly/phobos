@@ -96,8 +96,7 @@ $(TR $(TD Other) $(TD
 module std.path;
 
 
-// FIXME
-import std.file; //: getcwd;
+import std.file : getcwd;
 static import std.meta;
 import std.range.primitives;
 import std.traits;
@@ -3587,7 +3586,7 @@ if (isConvertibleToString!Range)
         $(LI `filename` must not contain any characters whose integer
             representation is in the range 0-31.)
         $(LI `filename` must not contain any of the following $(I reserved
-            characters): <>:"/\|?*)
+            characters): `<>:"/\|?*`)
         $(LI `filename` may not end with a space ($(D ' ')) or a period
             (`'.'`).)
     )

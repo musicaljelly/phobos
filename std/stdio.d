@@ -13,14 +13,14 @@ Authors:   $(HTTP digitalmars.com, Walter Bright),
  */
 module std.stdio;
 
-import core.stdc.stddef; // wchar_t
+import core.stdc.stddef : wchar_t;
 public import core.stdc.stdio;
-import std.algorithm.mutation; // copy
-import std.meta; // allSatisfy
-import std.range.primitives; // ElementEncodingType, empty, front,
-    // isBidirectionalRange, isInputRange, put
-import std.traits; // isSomeChar, isSomeString, Unqual, isPointer
-import std.typecons; // Flag
+import std.algorithm.mutation : copy;
+import std.meta : allSatisfy;
+import std.range.primitives : ElementEncodingType, empty, front,
+    isBidirectionalRange, isInputRange, put;
+import std.traits : isSomeChar, isSomeString, Unqual, isPointer;
+import std.typecons : Flag, No, Yes;
 
 /++
 If flag `KeepTerminator` is set to `KeepTerminator.yes`, then the delimiter
@@ -108,7 +108,7 @@ version (Windows)
     extern (C) nothrow @nogc FILE* _wfopen(in wchar* filename, in wchar* mode);
     extern (C) nothrow @nogc FILE* _wfreopen(in wchar* filename, in wchar* mode, FILE* fp);
 
-    import core.sys.windows.windows : HANDLE;
+    import core.sys.windows.basetsd : HANDLE;
 }
 
 version (DIGITAL_MARS_STDIO)
@@ -474,11 +474,18 @@ Assigns a file to another. The target of the assignment gets detached
 from whatever file it was attached to, and attaches itself to the new
 file.
  */
-    void opAssign(File rhs) @safe
+    ref File opAssign(File rhs) @safe return
     {
         import std.algorithm.mutation : swap;
 
         swap(this, rhs);
+        return this;
+    }
+
+    @safe unittest // bugzilla 20129
+    {
+        File[int] aa;
+        aa.require(0, File.init);
     }
 
 /**
@@ -557,9 +564,11 @@ Throws: `ErrnoException` in case of error.
         }
         if (_p.handle)
         {
-            errnoEnforce(.fclose(_p.handle) == 0,
-                    "Could not close file `"~_name~"'");
+            auto handle = _p.handle;
             _p.handle = null;
+            // fclose disassociates the FILE* even in case of error (issue 19751)
+            errnoEnforce(.fclose(handle) == 0,
+                    "Could not close file `"~_name~"'");
         }
     }
 
@@ -947,7 +956,7 @@ Throws: `Exception` if the file is not opened or if the OS call fails.
 
         version (Windows)
         {
-            import core.sys.windows.windows : FlushFileBuffers;
+            import core.sys.windows.winbase : FlushFileBuffers;
             wenforce(FlushFileBuffers(windowsHandle), "FlushFileBuffers failed");
         }
         else
@@ -1074,7 +1083,17 @@ Throws: `ErrnoException` if the file is not opened or if the call to `fwrite` fa
 
 /**
 Calls $(HTTP cplusplus.com/reference/clibrary/cstdio/fseek.html, fseek)
-for the file handle.
+for the file handle to move its position indicator.
+
+Params:
+    offset = Binary files: Number of bytes to offset from origin.$(BR)
+             Text files: Either zero, or a value returned by $(LREF tell).
+    origin = Binary files: Position used as reference for the offset, must be
+             one of $(REF_ALTTEXT SEEK_SET, SEEK_SET, core,stdc,stdio),
+             $(REF_ALTTEXT SEEK_CUR, SEEK_CUR, core,stdc,stdio) or
+             $(REF_ALTTEXT SEEK_END, SEEK_END, core,stdc,stdio).$(BR)
+             Text files: Shall necessarily be
+             $(REF_ALTTEXT SEEK_SET, SEEK_SET, core,stdc,stdio).
 
 Throws: `Exception` if the file is not opened.
         `ErrnoException` if the call to `fseek` fails.
@@ -1091,6 +1110,9 @@ Throws: `Exception` if the file is not opened.
             {
                 alias fseekFun = _fseeki64;
                 alias off_t = long;
+                // Issue 19797
+                enforce(origin >= SEEK_SET && origin <= SEEK_END,
+                        "Could not seek in file `"~_name~"' (Invalid argument)");
             }
             else
             {
@@ -1111,6 +1133,7 @@ Throws: `Exception` if the file is not opened.
     {
         import std.conv : text;
         static import std.file;
+        import std.exception;
 
         auto deleteme = testFilename();
         auto f = File(deleteme, "w+");
@@ -1133,6 +1156,7 @@ Throws: `Exception` if the file is not opened.
         // f.rawWrite("abcdefghijklmnopqrstuvwxyz");
         // f.seek(-3, SEEK_END);
         // assert(f.readln() == "xyz");
+        assertThrown(f.seek(0, 3));
     }
 
 /**
@@ -1230,7 +1254,8 @@ Throws: `Exception` if the file is not opened.
 
     version (Windows)
     {
-        import core.sys.windows.windows : ULARGE_INTEGER, OVERLAPPED, BOOL;
+        import core.sys.windows.winbase : OVERLAPPED;
+        import core.sys.windows.winnt : BOOL, ULARGE_INTEGER;
 
         private BOOL lockImpl(alias F, Flags...)(ulong start, ulong length,
             Flags flags)
@@ -1250,7 +1275,7 @@ Throws: `Exception` if the file is not opened.
 
         private static T wenforce(T)(T cond, string str)
         {
-            import core.sys.windows.windows : GetLastError;
+            import core.sys.windows.winbase : GetLastError;
             import std.windows.syserror : sysErrorString;
 
             if (cond) return cond;
@@ -1308,7 +1333,7 @@ $(UL
         else
         version (Windows)
         {
-            import core.sys.windows.windows : LockFileEx, LOCKFILE_EXCLUSIVE_LOCK;
+            import core.sys.windows.winbase : LockFileEx, LOCKFILE_EXCLUSIVE_LOCK;
             immutable type = lockType == LockType.readWrite ?
                 LOCKFILE_EXCLUSIVE_LOCK : 0;
             wenforce(lockImpl!LockFileEx(start, length, type),
@@ -1346,8 +1371,9 @@ specified file segment was already locked.
         else
         version (Windows)
         {
-            import core.sys.windows.windows : GetLastError, LockFileEx, LOCKFILE_EXCLUSIVE_LOCK,
-                ERROR_IO_PENDING, ERROR_LOCK_VIOLATION, LOCKFILE_FAIL_IMMEDIATELY;
+            import core.sys.windows.winbase : GetLastError, LockFileEx, LOCKFILE_EXCLUSIVE_LOCK,
+                LOCKFILE_FAIL_IMMEDIATELY;
+            import core.sys.windows.winerror : ERROR_IO_PENDING, ERROR_LOCK_VIOLATION;
             immutable type = lockType == LockType.readWrite
                 ? LOCKFILE_EXCLUSIVE_LOCK : 0;
             immutable res = lockImpl!LockFileEx(start, length,
@@ -1380,7 +1406,7 @@ Removes the lock over the specified file segment.
         else
         version (Windows)
         {
-            import core.sys.windows.windows : UnlockFileEx;
+            import core.sys.windows.winbase : UnlockFileEx;
             wenforce(lockImpl!UnlockFileEx(start, length),
                 "Could not remove lock for file `"~_name~"'");
         }
@@ -1419,7 +1445,7 @@ Removes the lock over the specified file segment.
         static void runForked(void delegate() code)
         {
             import core.stdc.stdlib : exit;
-            import core.sys.posix.sys.wait : wait;
+            import core.sys.posix.sys.wait : waitpid;
             import core.sys.posix.unistd : fork;
             int child, status;
             if ((child = fork()) == 0)
@@ -1429,7 +1455,7 @@ Removes the lock over the specified file segment.
             }
             else
             {
-                assert(wait(&status) != -1);
+                assert(waitpid(child, &status, 0) != -1);
                 assert(status == 0, "Fork crashed");
             }
         }
@@ -1668,13 +1694,14 @@ must copy the previous contents if you wish to retain them.
 
 Params:
 buf = Buffer used to store the resulting line data. buf is
-resized as necessary.
+enlarged if necessary, then set to the slice exactly containing the line.
 terminator = Line terminator (by default, `'\n'`). Use
 $(REF newline, std,ascii) for portability (unless the file was opened in
 text mode).
 
 Returns:
-0 for end of file, otherwise number of characters read
+0 for end of file, otherwise number of characters read.
+The return value will always be equal to `buf.length`.
 
 Throws: `StdioException` on I/O error, or `UnicodeException` on Unicode
 conversion error.
@@ -2117,6 +2144,7 @@ Allows to directly use range operations on lines of a file.
             Char[] buffer;
             Terminator terminator;
             KeepTerminator keepTerminator;
+            bool haveLine;
 
         public:
             this(File f, KeepTerminator kt, Terminator terminator)
@@ -2124,22 +2152,32 @@ Allows to directly use range operations on lines of a file.
                 file = f;
                 this.terminator = terminator;
                 keepTerminator = kt;
-                popFront();
             }
 
             // Range primitive implementations.
             @property bool empty()
             {
+                needLine();
                 return line is null;
             }
 
             @property Char[] front()
             {
+                needLine();
                 return line;
             }
 
             void popFront()
             {
+                needLine();
+                haveLine = false;
+            }
+
+        private:
+            void needLine()
+            {
+                if (haveLine)
+                    return;
                 import std.algorithm.searching : endsWith;
                 assert(file.isOpen);
                 line = buffer;
@@ -2168,6 +2206,7 @@ Allows to directly use range operations on lines of a file.
                         static assert(false);
                     line = line[0 .. line.length - tlen];
                 }
+                haveLine = true;
             }
         }
     }
@@ -2271,6 +2310,18 @@ the contents may well have changed).
             // check front is cached
             assert(blc.front is blc.front);
         }}
+    }
+
+    @system unittest // Issue 19980
+    {
+        static import std.file;
+        auto deleteme = testFilename();
+        std.file.write(deleteme, "Line 1\nLine 2\nLine 3\n");
+
+        auto f = File(deleteme);
+        f.byLine();
+        f.byLine();
+        assert(f.byLine().front == "Line 1");
     }
 
     private struct ByLineCopy(Char, Terminator)

@@ -92,7 +92,8 @@ version (Posix)
 version (Windows)
 {
     import core.stdc.stdio;
-    import core.sys.windows.windows;
+    import core.sys.windows.winbase;
+    import core.sys.windows.winnt;
     import std.utf;
     import std.windows.syserror;
 }
@@ -467,7 +468,6 @@ private Pid spawnProcessImpl(scope const(char[])[] args,
     void forkChild() nothrow @nogc
     {
         static import core.sys.posix.stdio;
-        pragma(inline, true);
 
         // Child process
 
@@ -509,6 +509,10 @@ private Pid spawnProcessImpl(scope const(char[])[] args,
 
             if (!(config & Config.inheritFDs))
             {
+                // NOTE: malloc() and getrlimit() are not on the POSIX async
+                // signal safe functions list, but practically this should not
+                // be a problem. Tha Java VM and CPython also use malloc() in
+                // its own implementation.
                 import core.stdc.stdlib : malloc;
                 import core.sys.posix.poll : pollfd, poll, POLLNVAL;
                 import core.sys.posix.sys.resource : rlimit, getrlimit, RLIMIT_NOFILE;
@@ -3084,7 +3088,8 @@ private:
     import core.stdc.stddef;
     import core.stdc.wchar_ : wcslen;
     import core.sys.windows.shellapi : CommandLineToArgvW;
-    import core.sys.windows.windows;
+    import core.sys.windows.winbase;
+    import core.sys.windows.winnt;
     import std.array;
 
     string[] parseCommandLine(string line)
@@ -3840,8 +3845,8 @@ version (StdDdoc)
     }
     else version (Windows)
     {
-        import core.stdc.stdlib : _exit;
-        _exit(wait(spawnProcess(commandLine)));
+        import core.stdc.stdlib : _Exit;
+        _Exit(wait(spawnProcess(commandLine)));
     }
     ---
     This is, however, NOT equivalent to POSIX' `execv*`.  For one thing, the
@@ -4004,7 +4009,7 @@ version (StdDdoc)
 else
 version (Windows)
 {
-    import core.sys.windows.windows;
+    import core.sys.windows.shellapi, core.sys.windows.winuser;
 
     pragma(lib,"shell32.lib");
 
