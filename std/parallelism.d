@@ -40,6 +40,15 @@ License:    $(HTTP boost.org/LICENSE_1_0.txt, Boost License 1.0)
 */
 module std.parallelism;
 
+version (OSX)
+    version = Darwin;
+else version (iOS)
+    version = Darwin;
+else version (TVOS)
+    version = Darwin;
+else version (WatchOS)
+    version = Darwin;
+
 ///
 @system unittest
 {
@@ -97,7 +106,7 @@ extern (C)
 }
 // !!!
 
-version (OSX)
+version (Darwin)
 {
     version = useSysctlbyname;
 }
@@ -555,7 +564,8 @@ struct Task(alias fun, Args...)
         }
     }
 
-    // Work around DMD bug 6588, allow immutable elements.
+    // Work around DMD bug https://issues.dlang.org/show_bug.cgi?id=6588,
+    // allow immutable elements.
     static if (allSatisfy!(isAssignable, Args))
     {
         typeof(this) opAssign(typeof(this) rhs)
@@ -858,7 +868,7 @@ void main()
 {
     // Create and execute a Task for reading
     // foo.txt.
-    auto file1Task = task(&read, "foo.txt");
+    auto file1Task = task(&read!string, "foo.txt", size_t.max);
     file1Task.executeInNewThread();
 
     // Read bar.txt in parallel.
@@ -997,9 +1007,9 @@ uint totalCPUsImpl() @nogc nothrow @trusted
     }
     else version (useSysctlbyname)
     {
-        version (OSX)
+        version (Darwin)
         {
-            auto nameStr = "machdep.cpu.core_count\0".ptr;
+            enum nameStr = "hw.physicalcpu";
         }
         else version (FreeBSD)
         {
@@ -1077,6 +1087,12 @@ Occasionally it is useful to explicitly instantiate a `TaskPool`:
 2.  When the threads in the global task pool are waiting on a synchronization
     primitive (for example a mutex), and you want to parallelize the code that
     needs to run before these threads can be resumed.
+
+Note: The worker threads in this pool will not stop until
+      `stop` or `finish` is called, even if the main thread
+      has finished already. This may lead to programs that
+      never end. If you do not want this behaviour, you can set `isDaemon`
+      to true.
  */
 final class TaskPool
 {
@@ -1488,7 +1504,7 @@ private:
 
         // Disabled until writing code to support
         // running thread with specified priority
-        // See https://d.puremagic.com/issues/show_bug.cgi?id=8960
+        // See https://issues.dlang.org/show_bug.cgi?id=8960
 
         /*if (priority != int.max)
         {
@@ -2743,8 +2759,8 @@ public:
             alias RTask = Task!(run, typeof(&reduceOnRange), R, size_t, size_t);
             RTask[] tasks;
 
-            // Can't use alloca() due to Bug 3753.  Use a fixed buffer
-            // backed by malloc().
+            // Can't use alloca() due to https://issues.dlang.org/show_bug.cgi?id=3753
+            // Use a fixed buffer backed by malloc().
             enum maxStack = 2_048;
             byte[maxStack] buf = void;
             immutable size_t nBytesNeeded = nWorkUnits * RTask.sizeof;
@@ -3666,7 +3682,8 @@ ParallelForeach!R parallel(R)(R range, size_t workUnitSize)
     return taskPool.parallel(range, workUnitSize);
 }
 
-// #17019: `each` should be usable with parallel
+//  `each` should be usable with parallel
+// https://issues.dlang.org/show_bug.cgi?id=17019
 @system unittest
 {
     import std.algorithm.iteration : each, sum;
@@ -3713,9 +3730,10 @@ private void submitAndExecute(
     // The logical thing to do would be to just use alloca() here, but that
     // causes problems on Windows for reasons that I don't understand
     // (tentatively a compiler bug) and definitely doesn't work on Posix due
-    // to Bug 3753.  Therefore, allocate a fixed buffer and fall back to
-    // malloc() if someone's using a ridiculous amount of threads.  Also,
-    // the using a byte array instead of a PTask array as the fixed buffer
+    // to https://issues.dlang.org/show_bug.cgi?id=3753.
+    // Therefore, allocate a fixed buffer and fall back to `malloc()` if
+    // someone's using a ridiculous amount of threads.
+    // Also, the using a byte array instead of a PTask array as the fixed buffer
     // is to prevent d'tors from being called on uninitialized excess PTask
     // instances.
     enum nBuf = 64;
@@ -4226,7 +4244,7 @@ private struct RoundRobinBuffer(C1, C2)
     }
 }
 
-version (unittest)
+version (StdUnittest)
 {
     // This was the only way I could get nested maps to work.
     private __gshared TaskPool poolInstance;
@@ -4448,7 +4466,7 @@ version (unittest)
         pool2.finish(true); // blocking
         assert(tSlow2.done);
 
-        // Test fix for Bug 8582 by making pool size zero.
+        // Test fix for https://issues.dlang.org/show_bug.cgi?id=8582 by making pool size zero.
         auto pool3 = new TaskPool(0);
         auto tSlow3 = task!slowFun();
         pool3.put(tSlow3);
@@ -4472,25 +4490,25 @@ version (unittest)
     assert(equal(nums, iota(1000)));
 
     assert(equal(
-               poolInstance.map!"a * a"(iota(30_000_001), 10_000),
-               map!"a * a"(iota(30_000_001))
+               poolInstance.map!"a * a"(iota(3_000_001), 10_000),
+               map!"a * a"(iota(3_000_001))
            ));
 
     // The filter is to kill random access and test the non-random access
     // branch.
     assert(equal(
                poolInstance.map!"a * a"(
-                   filter!"a == a"(iota(30_000_001)
+                   filter!"a == a"(iota(3_000_001)
                                   ), 10_000, 1000),
-               map!"a * a"(iota(30_000_001))
+               map!"a * a"(iota(3_000_001))
            ));
 
     assert(
         reduce!"a + b"(0UL,
-                       poolInstance.map!"a * a"(iota(3_000_001), 10_000)
+                       poolInstance.map!"a * a"(iota(300_001), 10_000)
                       ) ==
         reduce!"a + b"(0UL,
-                       map!"a * a"(iota(3_000_001))
+                       map!"a * a"(iota(300_001))
                       )
     );
 

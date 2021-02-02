@@ -98,9 +98,9 @@ private
         static assert(!hasLocalAliasing!(Tid, Container, int));
     }
 
+    // https://issues.dlang.org/show_bug.cgi?id=20097
     @safe unittest
     {
-        /* Issue 20097 */
         import std.datetime.systime : SysTime;
         static struct Container { SysTime time; }
         static assert(!hasLocalAliasing!(SysTime, Container));
@@ -184,9 +184,12 @@ private
 
     void checkops(T...)(T ops)
     {
+        import std.format : format;
+
         foreach (i, t1; T)
         {
-            static assert(isFunctionPointer!t1 || isDelegate!t1);
+            static assert(isFunctionPointer!t1 || isDelegate!t1,
+                    format!"T %d is not a function pointer or delegates"(i));
             alias a1 = Parameters!(t1);
             alias r1 = ReturnType!(t1);
 
@@ -198,7 +201,6 @@ private
 
                 foreach (t2; T[i + 1 .. $])
                 {
-                    static assert(isFunctionPointer!t2 || isDelegate!t2);
                     alias a2 = Parameters!(t2);
 
                     static assert(!is(a1 == a2),
@@ -619,6 +621,7 @@ if (isSpawnable!(F, T))
  * $(REF spawn, std,concurrency), `T` must not have unshared aliasing.
  */
 void send(T...)(Tid tid, T vals)
+in (tid.mbox !is null)
 {
     static assert(!hasLocalAliasing!(T), "Aliases to mutable thread-local data not allowed.");
     _send(tid, vals);
@@ -632,6 +635,7 @@ void send(T...)(Tid tid, T vals)
  * out-of-band communication, to signal exceptional conditions, etc.
  */
 void prioritySend(T...)(Tid tid, T vals)
+in (tid.mbox !is null)
 {
     static assert(!hasLocalAliasing!(T), "Aliases to mutable thread-local data not allowed.");
     _send(MsgType.priority, tid, vals);
@@ -641,6 +645,7 @@ void prioritySend(T...)(Tid tid, T vals)
  * ditto
  */
 private void _send(T...)(Tid tid, T vals)
+in (tid.mbox !is null)
 {
     _send(MsgType.standard, tid, vals);
 }
@@ -650,6 +655,7 @@ private void _send(T...)(Tid tid, T vals)
  * both Tid.send() and .send().
  */
 private void _send(T...)(MsgType type, Tid tid, T vals)
+in (tid.mbox !is null)
 {
     auto msg = Message(type, vals);
     tid.mbox.put(msg);
@@ -667,6 +673,12 @@ private void _send(T...)(MsgType type, Tid tid, T vals)
  * matched by an earlier delegate.  If more than one argument is sent,
  * the `Variant` will contain a $(REF Tuple, std,typecons) of all values
  * sent.
+ *
+ * Params:
+ *     ops = Variadic list of function pointers and delegates. Entries
+ *           in this list must not occlude later entries.
+ *
+ * Throws: $(LREF OwnerTerminated) when the sending thread was terminated.
  */
 void receive(T...)( T ops )
 in
@@ -735,7 +747,7 @@ do
 }
 
 // Make sure receive() works with free functions as well.
-version (unittest)
+version (StdUnittest)
 {
     private void receiveFunction(int x) {}
 }
@@ -763,13 +775,17 @@ private template receiveOnlyRet(T...)
 }
 
 /**
- * Receives only messages with arguments of types `T`.
+ * Receives only messages with arguments of the specified types.
  *
- * Throws:  `MessageMismatch` if a message of types other than `T`
- *          is received.
+ * Params:
+ *     T = Variadic list of types to be received.
  *
- * Returns: The received message.  If `T.length` is greater than one,
+ * Returns: The received message.  If `T` has more than one entry,
  *          the message will be packed into a $(REF Tuple, std,typecons).
+ *
+ * Throws: $(LREF MessageMismatch) if a message of types other than `T`
+ *         is received,
+ *         $(LREF OwnerTerminated) when the sending thread was terminated.
  */
 receiveOnlyRet!(T) receiveOnly(T...)()
 in
@@ -863,13 +879,30 @@ do
 }
 
 /**
- * Tries to receive but will give up if no matches arrive within duration.
- * Won't wait at all if provided $(REF Duration, core,time) is negative.
+ * Receives a message from another thread and gives up if no match
+ * arrives within a specified duration.
  *
- * Same as `receive` except that rather than wait forever for a message,
- * it waits until either it receives a message or the given
- * $(REF Duration, core,time) has passed. It returns `true` if it received a
- * message and `false` if it timed out waiting for one.
+ * Receive a message from another thread, or block until `duration` exceeds,
+ * if no messages of the specified types are available. This function works
+ * by pattern matching a message against a set of delegates and executing
+ * the first match found.
+ *
+ * If a delegate that accepts a $(REF Variant, std,variant) is included as
+ * the last argument, it will match any message that was not
+ * matched by an earlier delegate.  If more than one argument is sent,
+ * the `Variant` will contain a $(REF Tuple, std,typecons) of all values
+ * sent.
+ *
+ * Params:
+ *     duration = Duration, how long to wait. If `duration` is negative,
+ *                won't wait at all.
+ *     ops = Variadic list of function pointers and delegates. Entries
+ *           in this list must not occlude later entries.
+ *
+ * Returns: `true` if it received a message and `false` if it timed out waiting
+ *          for one.
+ *
+ * Throws: $(LREF OwnerTerminated) when the sending thread was terminated.
  */
 bool receiveTimeout(T...)(Duration duration, T ops)
 in
@@ -949,6 +982,7 @@ private
  *             mailbox.
  */
 void setMaxMailboxSize(Tid tid, size_t messages, OnCrowding doThis) @safe pure
+in (tid.mbox !is null)
 {
     final switch (doThis)
     {
@@ -975,6 +1009,7 @@ void setMaxMailboxSize(Tid tid, size_t messages, OnCrowding doThis) @safe pure
  *                     mailbox.
  */
 void setMaxMailboxSize(Tid tid, size_t messages, bool function(Tid) onCrowdingDoThis)
+in (tid.mbox !is null)
 {
     tid.mbox.setMaxMsgs(messages, onCrowdingDoThis);
 }
@@ -992,18 +1027,17 @@ private @property Mutex registryLock()
     return impl;
 }
 
-private void unregisterMe()
+private void unregisterMe(ref ThreadInfo me)
 {
-    auto me = thisInfo.ident;
-    if (thisInfo.ident != Tid.init)
+    if (me.ident != Tid.init)
     {
         synchronized (registryLock)
         {
-            if (auto allNames = me in namesByTid)
+            if (auto allNames = me.ident in namesByTid)
             {
                 foreach (name; *allNames)
                     tidByName.remove(name);
-                namesByTid.remove(me);
+                namesByTid.remove(me.ident);
             }
         }
     }
@@ -1025,6 +1059,7 @@ private void unregisterMe()
  *  defunct thread.
  */
 bool register(string name, Tid tid)
+in (tid.mbox !is null)
 {
     synchronized (registryLock)
     {
@@ -1126,7 +1161,18 @@ struct ThreadInfo
             _send(MsgType.linkDead, tid, ident);
         if (owner != Tid.init)
             _send(MsgType.linkDead, owner, ident);
-        unregisterMe(); // clean up registry entries
+        unregisterMe(this); // clean up registry entries
+    }
+
+    // https://issues.dlang.org/show_bug.cgi?id=20160
+    @system unittest
+    {
+        register("main_thread", thisTid());
+
+        ThreadInfo t;
+        t.cleanup();
+
+        assert(locate("main_thread") == thisTid());
     }
 }
 
@@ -1361,7 +1407,30 @@ class FiberScheduler : Scheduler
         return new FiberCondition(m);
     }
 
-private:
+protected:
+    /**
+     * Creates a new Fiber which calls the given delegate.
+     *
+     * Params:
+     *   op = The delegate the fiber should call
+     */
+    void create(void delegate() op) nothrow
+    {
+        void wrap()
+        {
+            scope (exit)
+            {
+                thisInfo.cleanup();
+            }
+            op();
+        }
+
+        m_fibers ~= new InfoFiber(&wrap);
+    }
+
+    /**
+     * Fiber which embeds a ThreadInfo
+     */
     static class InfoFiber : Fiber
     {
         ThreadInfo info;
@@ -1370,8 +1439,14 @@ private:
         {
             super(op);
         }
+
+        this(void delegate() op, size_t sz) nothrow
+        {
+            super(op, sz);
+        }
     }
 
+private:
     class FiberCondition : Condition
     {
         this(Mutex m) nothrow
@@ -1450,20 +1525,6 @@ private:
                 m_pos = 0;
             }
         }
-    }
-
-    void create(void delegate() op) nothrow
-    {
-        void wrap()
-        {
-            scope (exit)
-            {
-                thisInfo.cleanup();
-            }
-            op();
-        }
-
-        m_fibers ~= new InfoFiber(&wrap);
     }
 
 private:
@@ -1987,7 +2048,7 @@ private
         {
             import std.meta : AliasSeq;
 
-            static assert(T.length);
+            static assert(T.length, "T must not be empty");
 
             static if (isImplicitlyConvertible!(T[0], Duration))
             {
@@ -2028,7 +2089,8 @@ private
 
             bool onLinkDeadMsg(ref Message msg)
             {
-                assert(msg.convertsTo!(Tid));
+                assert(msg.convertsTo!(Tid),
+                        "Message could be converted to Tid");
                 auto tid = msg.get!(Tid);
 
                 if (bool* pDepends = tid in thisInfo.links)
@@ -2205,7 +2267,8 @@ private
         {
             static void onLinkDeadMsg(ref Message msg)
             {
-                assert(msg.convertsTo!(Tid));
+                assert(msg.convertsTo!(Tid),
+                        "Message could be converted to Tid");
                 auto tid = msg.get!(Tid);
 
                 thisInfo.links.remove(tid);
@@ -2350,7 +2413,7 @@ private
         {
             import std.exception : enforce;
 
-            assert(m_count);
+            assert(m_count, "Can not remove from empty Range");
             Node* n = r.m_prev;
             enforce(n && n.next, "attempting to remove invalid list node");
 

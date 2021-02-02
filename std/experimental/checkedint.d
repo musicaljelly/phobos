@@ -480,6 +480,8 @@ if (isIntegral!T || is(T == Checked!(U, H), U, H))
     ///
     static if (is(T == int) && is(Hook == void)) @safe unittest
     {
+        import std.traits : isUnsigned;
+
         static struct MyHook
         {
             static bool thereWereErrors;
@@ -616,6 +618,8 @@ if (isIntegral!T || is(T == Checked!(U, H), U, H))
     ///
     static if (is(T == int) && is(Hook == void)) @safe unittest
     {
+        import std.traits : isUnsigned;
+
         static struct MyHook
         {
             static bool thereWereErrors;
@@ -1608,7 +1612,10 @@ static:
     {
         stderr.writefln("Overflow on binary operator: %s(%s) %s %s(%s)",
             Lhs.stringof, lhs, x, Rhs.stringof, rhs);
-        return mixin("lhs" ~ x ~ "rhs");
+        static if (x == "/")               // Issue 20743: mixin below would cause SIGFPE on POSIX
+            return typeof(lhs / rhs).min;  // or EXCEPTION_INT_OVERFLOW on Windows
+        else
+            return mixin("lhs" ~ x ~ "rhs");
     }
 }
 
@@ -1620,6 +1627,23 @@ static:
     //x += long(int.max);
     auto y = checked!Warn(cast(const int) 42);
     short y1 = cast(const byte) y;
+}
+
+@system unittest
+{
+    auto a = checked!Warn(int.min);
+    auto b = checked!Warn(-1);
+    assert(a / b == a * b);
+}
+
+@system unittest
+{
+    import std.exception : assertThrown;
+    import core.exception : AssertError;
+
+    auto a = checked!Abort(int.min);
+    auto b = checked!Abort(-1);
+    assertThrown!AssertError(a / b);
 }
 
 // ProperCompare
@@ -2709,7 +2733,7 @@ if (isIntegral!T && T.sizeof >= 4)
     testPow!ulong(3, 41);
 }
 
-version (unittest) private struct CountOverflows
+version (StdUnittest) private struct CountOverflows
 {
     uint calls;
     auto onOverflow(string op, Lhs)(Lhs lhs)
@@ -2734,19 +2758,18 @@ version (unittest) private struct CountOverflows
     }
 }
 
-version (unittest) private struct CountOpBinary
-{
-    uint calls;
-    auto hookOpBinary(string op, Lhs, Rhs)(Lhs lhs, Rhs rhs)
-    {
-        ++calls;
-        return mixin("lhs" ~ op ~ "rhs");
-    }
-}
-
 // opBinary
 @nogc nothrow pure @safe unittest
 {
+    static struct CountOpBinary
+    {
+        uint calls;
+        auto hookOpBinary(string op, Lhs, Rhs)(Lhs lhs, Rhs rhs)
+        {
+            ++calls;
+            return mixin("lhs" ~ op ~ "rhs");
+        }
+    }
     auto x = Checked!(const int, void)(42), y = Checked!(immutable int, void)(142);
     assert(x + y == 184);
     assert(x + 100 == 142);

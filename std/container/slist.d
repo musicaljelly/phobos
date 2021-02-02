@@ -82,13 +82,13 @@ if (!is(T == shared))
 
     private ref inout(Node*) _first() @property @safe nothrow pure inout
     {
-        assert(_root);
+        assert(_root, "root pointer must not be null");
         return _root._next;
     }
 
     private static Node * findLastNode(Node * n)
     {
-        assert(n);
+        assert(n, "Node n pointer must not be null");
         auto ahead = n._next;
         while (ahead)
         {
@@ -100,7 +100,8 @@ if (!is(T == shared))
 
     private static Node * findLastNode(Node * n, size_t limit)
     {
-        assert(n && limit);
+        assert(n, "Node n pointer must not be null");
+        assert(limit, "limit must be greater than 0");
         auto ahead = n._next;
         while (ahead)
         {
@@ -113,7 +114,7 @@ if (!is(T == shared))
 
     private static Node * findNode(Node * n, Node * findMe)
     {
-        assert(n);
+        assert(n, "Node n pointer must not be null");
         auto ahead = n._next;
         while (ahead != findMe)
         {
@@ -878,9 +879,9 @@ Complexity: $(BIGOH n)
     auto s = make!(SList!int)(1, 2, 3);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=5193
 @safe unittest
 {
-    // 5193
     static struct Data
     {
         const int val;
@@ -898,17 +899,17 @@ Complexity: $(BIGOH n)
     assert(r.front == 1);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=14920
 @safe unittest
 {
-    // issue 14920
     SList!int s;
     s.insertAfter(s[], 1);
     assert(s.front == 1);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=15659
 @safe unittest
 {
-    // issue 15659
     SList!int s;
     s.clear();
 }

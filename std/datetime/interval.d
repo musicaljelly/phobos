@@ -2,6 +2,7 @@
 
 /++
 $(SCRIPT inhibitQuickIndex = 1;)
+$(DIVC quickindex,
 $(BOOKTABLE,
 $(TR $(TH Category) $(TH Functions))
 $(TR $(TD Main types) $(TD
@@ -25,7 +26,7 @@ $(TR $(TD Underlying ranges) $(TD
 $(TR $(TD Flags) $(TD
     $(LREF PopFirst)
 ))
-)
+))
 
     License:   $(HTTP www.boost.org/LICENSE_1_0.txt, Boost License 1.0).
     Authors:   $(HTTP jmdavisprog.com, Jonathan M Davis)
@@ -38,10 +39,10 @@ import std.datetime.date : AllowDayOverflow, DateTimeException, daysToDayOfWeek,
                            DayOfWeek, isTimePoint, Month;
 import std.exception : enforce;
 import std.range.primitives : isOutputRange;
-import std.traits : isIntegral, Unqual;
+import std.traits : isIntegral;
 import std.typecons : Flag;
 
-version (unittest) import std.exception : assertThrown;
+version (StdUnittest) import std.exception : assertThrown;
 
 
 /++
@@ -136,7 +137,7 @@ public:
         --------------------
       +/
     this(U)(scope const TP begin, scope const U end) pure
-        if (is(Unqual!TP == Unqual!U))
+        if (is(immutable TP == immutable U))
     {
         if (!_valid(begin, end))
             throw new DateTimeException("Arguments would result in an invalid Interval.");
@@ -4132,9 +4133,9 @@ assert(!range.empty);
     /+
         Converts this interval to a string.
       +/
-    //Due to bug http://d.puremagic.com/issues/show_bug.cgi?id=3715 , we can't
-    //have versions of toString() with extra modifiers, so we define one version
-    //with modifiers and one without.
+    // Due to bug https://issues.dlang.org/show_bug.cgi?id=3715 , we can't
+    // have versions of toString() with extra modifiers,
+    // so we define one version with modifiers and one without.
     string toString()
     {
         return _toStringImpl();
@@ -4144,9 +4145,9 @@ assert(!range.empty);
     /++
         Converts this interval to a string.
       +/
-    //Due to bug http://d.puremagic.com/issues/show_bug.cgi?id=3715 , we can't
-    //have versions of toString() with extra modifiers, so we define one version
-    //with modifiers and one without.
+    // Due to bug https://issues.dlang.org/show_bug.cgi?id=3715 , we can't
+    // have versions of toString() with extra modifiers,
+    // so we define one version with modifiers and one without.
     string toString() const nothrow
     {
         return _toStringImpl();
@@ -6356,9 +6357,9 @@ assert(!range.empty);
     /+
         Converts this interval to a string.
       +/
-    //Due to bug http://d.puremagic.com/issues/show_bug.cgi?id=3715 , we can't
-    //have versions of toString() with extra modifiers, so we define one version
-    //with modifiers and one without.
+    // Due to bug https://issues.dlang.org/show_bug.cgi?id=3715 , we can't
+    // have versions of toString() with extra modifiers,
+    // so we define one version with modifiers and one without.
     string toString()
     {
         return _toStringImpl();
@@ -6368,9 +6369,9 @@ assert(!range.empty);
     /++
         Converts this interval to a string.
       +/
-    //Due to bug http://d.puremagic.com/issues/show_bug.cgi?id=3715 , we can't
-    //have versions of toString() with extra modifiers, so we define one version
-    //with modifiers and one without.
+    // Due to bug https://issues.dlang.org/show_bug.cgi?id=3715 , we can't
+    // have versions of toString() with extra modifiers,
+    // so we define one version with modifiers and one without.
     string toString() const nothrow
     {
         return _toStringImpl();
@@ -8306,8 +8307,8 @@ private:
     static assert(isInputRange!(IntervalRange!(Date, Direction.fwd)));
     static assert(isForwardRange!(IntervalRange!(Date, Direction.fwd)));
 
-    //Commented out due to bug http://d.puremagic.com/issues/show_bug.cgi?id=4895
-    //static assert(!isOutputRange!(IntervalRange!(Date, Direction.fwd), Date));
+    // Commented out due to bug https://issues.dlang.org/show_bug.cgi?id=4895
+    // static assert(!isOutputRange!(IntervalRange!(Date, Direction.fwd), Date));
 
     static assert(!isBidirectionalRange!(IntervalRange!(Date, Direction.fwd)));
     static assert(!isRandomAccessRange!(IntervalRange!(Date, Direction.fwd)));
@@ -8753,8 +8754,8 @@ private:
     static assert(isForwardRange!(PosInfIntervalRange!Date));
     static assert(isInfinite!(PosInfIntervalRange!Date));
 
-    //Commented out due to bug http://d.puremagic.com/issues/show_bug.cgi?id=4895
-    //static assert(!isOutputRange!(PosInfIntervalRange!Date, Date));
+    // Commented out due to bug https://issues.dlang.org/show_bug.cgi?id=4895
+    // static assert(!isOutputRange!(PosInfIntervalRange!Date, Date));
     static assert(!isBidirectionalRange!(PosInfIntervalRange!Date));
     static assert(!isRandomAccessRange!(PosInfIntervalRange!Date));
     static assert(!hasSwappableElements!(PosInfIntervalRange!Date));
@@ -9036,8 +9037,8 @@ private:
     static assert(isForwardRange!(NegInfIntervalRange!Date));
     static assert(isInfinite!(NegInfIntervalRange!Date));
 
-    //Commented out due to bug http://d.puremagic.com/issues/show_bug.cgi?id=4895
-    //static assert(!isOutputRange!(NegInfIntervalRange!Date, Date));
+    // Commented out due to bug https://issues.dlang.org/show_bug.cgi?id=4895
+    // static assert(!isOutputRange!(NegInfIntervalRange!Date, Date));
     static assert(!isBidirectionalRange!(NegInfIntervalRange!Date));
     static assert(!isRandomAccessRange!(NegInfIntervalRange!Date));
     static assert(!hasSwappableElements!(NegInfIntervalRange!Date));

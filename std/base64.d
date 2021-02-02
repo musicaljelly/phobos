@@ -363,7 +363,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         }
 
         // @@@BUG@@@ Workaround for DbC problem. See comment on 'out'.
-        version (unittest)
+        version (StdUnittest)
             assert(
                 bufptr - buffer.ptr == encodeLength(srcLen),
                 "The length of result is different from Base64"
@@ -476,12 +476,6 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
     size_t encode(R1, R2)(R1 source, auto ref R2 range)
         if (!isArray!R1 && isInputRange!R1 && is(ElementType!R1 : ubyte) &&
             hasLength!R1 && !is(R2 == char[]) && isOutputRange!(R2, char))
-    out(result)
-    {
-        // @@@BUG@@@ Workaround for DbC problem.
-        //assert(result == encodeLength(source.length), "The number of put is different from the length of Base64");
-    }
-    do
     {
         immutable srcLen = source.length;
         if (srcLen == 0)
@@ -541,7 +535,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         }
 
         // @@@BUG@@@ Workaround for DbC problem.
-        version (unittest)
+        version (StdUnittest)
             assert(
                 pcount == encodeLength(srcLen),
                 "The number of put is different from the length of Base64"
@@ -1077,12 +1071,6 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
     {
         assert(buffer.length >= decodeLength(source.length), "Insufficient buffer for decoding");
     }
-    out(result)
-    {
-        // @@@BUG@@@ Workaround for DbC problem.
-        //immutable expect = decodeLength(source.length) - 2;
-        //assert(result.length >= expect, "The length of result is smaller than expected length");
-    }
     do
     {
         immutable srcLen = source.length;
@@ -1135,8 +1123,8 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
             }
         }
 
-        // @@@BUG@@@ Workaround for DbC problem.
-        version (unittest)
+        // We need to do the check here because we have consumed the length
+        version (StdUnittest)
             assert(
                 (bufptr - buffer.ptr) >= (decodeLength(srcLen) - 2),
                 "The length of result is smaller than expected length"
@@ -1321,7 +1309,7 @@ template Base64Impl(char Map62th, char Map63th, char Padding = '=')
         }
 
         // @@@BUG@@@ Workaround for DbC problem.
-        version (unittest)
+        version (StdUnittest)
             assert(
                 pcount >= (decodeLength(srcLen) - 2),
                 "The length of result is smaller than expected length"
@@ -1908,7 +1896,8 @@ class Base64Exception : Exception
         assert(tv["foobar"] == b.data); a.clear(); b.clear();
     }
 
-    // @@@9543@@@ These tests were disabled because they actually relied on the input range having length.
+    // https://issues.dlang.org/show_bug.cgi?id=9543
+    // These tests were disabled because they actually relied on the input range having length.
     // The implementation (currently) doesn't support encoding/decoding from a length-less source.
     version (none)
     { // with InputRange

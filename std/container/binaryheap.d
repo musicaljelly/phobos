@@ -95,12 +95,14 @@ if (isRandomAccessRange!(Store) || isRandomAccessRange!(typeof(Store.init[])))
     // Convenience accessors
     private @property ref Store _store()
     {
-        assert(_payload.refCountedStore.isInitialized);
+        assert(_payload.refCountedStore.isInitialized,
+                "BinaryHeap not initialized");
         return _payload._store;
     }
     private @property ref size_t _length()
     {
-        assert(_payload.refCountedStore.isInitialized);
+        assert(_payload.refCountedStore.isInitialized,
+                "BinaryHeap not initialized");
         return _payload._length;
     }
 
@@ -386,7 +388,8 @@ leaves the heap unaffected and returns `false`.
     bool conditionalSwap(ref ElementType!Store value)
     {
         _payload.refCountedStore.ensureInitialized();
-        assert(_length == _store.length);
+        assert(_length == _store.length,
+                "length and number of stored items out of sync");
         assert(!_store.empty, "Cannot swap front of an empty heap.");
 
         if (!comp(value, _store.front)) return false; // value >= largest
@@ -477,7 +480,8 @@ BinaryHeap!(Store, less) heapify(alias less = "a < b", Store)(Store s,
     assert(h.equal([16, 14, 10, 9, 8, 7, 4, 3, 2, 1]));
 }
 
-@system unittest // 15675
+// https://issues.dlang.org/show_bug.cgi?id=15675
+@system unittest
 {
     import std.container.array : Array;
 
@@ -486,7 +490,8 @@ BinaryHeap!(Store, less) heapify(alias less = "a < b", Store)(Store s,
     assert(heap.front == 12);
 }
 
-@system unittest // 16072
+// https://issues.dlang.org/show_bug.cgi?id=16072
+@system unittest
 {
     auto q = heapify!"a > b"([2, 4, 5]);
     q.insert(1);
@@ -581,7 +586,8 @@ BinaryHeap!(Store, less) heapify(alias less = "a < b", Store)(Store s,
     assert(equal(b, [10, 9, 8, 7, 6, 6, 7, 8, 9, 10]));
 }
 
-@system unittest // Issue 17314
+// https://issues.dlang.org/show_bug.cgi?id=17314
+@system unittest
 {
     import std.algorithm.comparison : equal;
     int[] a = [5];

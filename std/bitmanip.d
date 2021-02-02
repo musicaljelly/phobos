@@ -4,6 +4,7 @@
 Bit-level manipulation facilities.
 
 $(SCRIPT inhibitQuickIndex = 1;)
+$(DIVC quickindex,
 $(BOOKTABLE,
 $(TR $(TH Category) $(TH Functions))
 $(TR $(TD Bit constructs) $(TD
@@ -32,7 +33,7 @@ $(TR $(TD Tagging) $(TD
     $(LREF taggedClassRef)
     $(LREF taggedPointer)
 ))
-)
+))
 
 Copyright: Copyright The D Language Foundation 2007 - 2011.
 License:   $(HTTP www.boost.org/LICENSE_1_0.txt, Boost License 1.0).
@@ -56,13 +57,22 @@ import std.range.primitives;
 public import std.system : Endian;
 import std.traits;
 
-private string myToString(ulong n)
+private string myToString(ulong n) pure @safe
 {
     import core.internal.string : UnsignedStringBuf, unsignedToTempString;
     UnsignedStringBuf buf;
     auto s = unsignedToTempString(n, buf);
-    return cast(string) s ~ (n > uint.max ? "UL" : "U");
+    // pure allows implicit cast to string
+    return s ~ (n > uint.max ? "UL" : "U");
 }
+
+@safe pure unittest
+{
+    assert(myToString(5) == "5U");
+    assert(myToString(uint.max) == "4294967295U");
+    assert(myToString(uint.max + 1UL) == "4294967296UL");
+}
+
 
 private template createAccessors(
     string store, T, string name, size_t len, size_t offset)
@@ -277,6 +287,7 @@ of the bitfields storage.
     assert(obj.x == 2);
     assert(obj.y == 0);
     assert(obj.z == 2);
+    assert(obj.flag == false);
 }
 
 /**
@@ -294,6 +305,12 @@ one bitfield with an empty name.
             uint, "",         6));
     }
 
+    A a;
+    assert(a.flag1 == 0);
+    a.flag1 = 1;
+    assert(a.flag1 == 1);
+    a.flag1 = 0;
+    assert(a.flag1 == 0);
 }
 
 /// enums can be used too
@@ -307,51 +324,6 @@ one bitfield with an empty name.
                   bool, "y", 1,
                   ubyte, "z", 5));
     }
-}
-
-/**
-Creates a bitfield pack of eight bits, which fit in
-one `ubyte`. The bitfields are allocated starting from the
-least significant bit, i.e. x occupies the two least significant bits
-of the bitfields storage.
-*/
-@safe unittest
-{
-    struct A
-    {
-        int a;
-        mixin(bitfields!(
-            uint, "x",    2,
-            int,  "y",    3,
-            uint, "z",    2,
-            bool, "flag", 1));
-    }
-    A obj;
-    obj.x = 2;
-    obj.z = obj.x;
-
-    assert(obj.x == 2);
-    assert(obj.y == 0);
-    assert(obj.z == 2);
-    assert(obj.flag == false);
-}
-
-/// Add empty fields for padding to have a total bit length of 8, 16, 32, or 64
-@safe unittest
-{
-    struct A
-    {
-        mixin(bitfields!(
-            bool, "flag1",    1,
-            bool, "flag2",    1,
-            uint, "",         6));
-    }
-    A a;
-    assert(a.flag1 == 0);
-    a.flag1 = 1;
-    assert(a.flag1 == 1);
-    a.flag1 = 0;
-    assert(a.flag1 == 0);
 }
 
 /**
@@ -425,7 +397,9 @@ if (is(T == class))
 @safe pure nothrow @nogc
 unittest
 {
-    // Degenerate bitfields (#8474 / #11160) tests mixed with range tests
+    // Degenerate bitfields tests mixed with range tests
+    // https://issues.dlang.org/show_bug.cgi?id=8474
+    // https://issues.dlang.org/show_bug.cgi?id=11160
     struct Test1
     {
         mixin(bitfields!(uint, "a", 32,
@@ -553,9 +527,9 @@ unittest
     static assert(!__traits(compiles, bar(s)));
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=6686
 @safe unittest
 {
-    // Bug #6686
     union  S {
         ulong bits = ulong.max;
         mixin (bitfields!(
@@ -570,9 +544,9 @@ unittest
     assert(num.bits == 0xFFFF_FFFF_8000_0001uL);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=5942
 @safe unittest
 {
-    // Bug #5942
     struct S
     {
         mixin(bitfields!(
@@ -635,7 +609,7 @@ unittest
         assert(i.checkExpectations(true, 7, 7));
     }
 
-    //Bug# 8876
+    //https://issues.dlang.org/show_bug.cgi?id=8876
     {
         struct MoreIntegrals {
             bool checkExpectations(uint eu, ushort es, uint ei) { return u == eu && s == es && i == ei; }
@@ -688,7 +662,7 @@ unittest
     assert(f.checkExpectations(true));
 }
 
-// Issue 12477
+// https://issues.dlang.org/show_bug.cgi?id=12477
 @system unittest
 {
     import core.exception : AssertError;
@@ -896,9 +870,9 @@ struct DoubleRep
     assert(x.value == -5.0);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=15305
 @safe unittest
 {
-    // Issue #15305
     struct S {
             mixin(bitfields!(
                     bool, "alice", 1,
@@ -1018,8 +992,6 @@ public:
 
     This constructor is the inverse of $(LREF opCast).
 
-    $(RED Warning: All unmapped bits in the final word will be set to 0.)
-
     Params:
         v = Source array. `v.length` must be a multple of `size_t.sizeof`.
         numbits = Number of bits to be mapped from the source array, i.e.
@@ -1037,11 +1009,6 @@ public:
     {
         _ptr = cast(size_t*) v.ptr;
         _len = numbits;
-        if (endBits)
-        {
-            // Need to mask away extraneous bits from v.
-            _ptr[dim - 1] &= endMask;
-        }
     }
 
     ///
@@ -1080,7 +1047,8 @@ public:
     @system unittest
     {
         // Example from the doc for this constructor.
-        size_t[] source = [1, 0b101, 3, 3424234, 724398, 230947, 389492];
+        static immutable size_t[] sourceData = [1, 0b101, 3, 3424234, 724398, 230947, 389492];
+        size_t[] source = sourceData.dup;
         enum sbits = size_t.sizeof * 8;
         auto ba = BitArray(source, source.length * sbits);
         foreach (n; 0 .. source.length * sbits)
@@ -1094,8 +1062,8 @@ public:
 
         auto bc = BitArray(source, sbits + 1);
         assert(bc.bitsSet.equal([0, sbits]));
-        // The unmapped bits from the final word have been cleared.
-        assert(source[1] == 1);
+        // Source array has not been modified.
+        assert(source == sourceData);
     }
 
     // Deliberately undocumented: raw initialization of bit array.
@@ -1128,8 +1096,9 @@ public:
     /**********************************************
      * Sets the amount of bits in the `BitArray`.
      * $(RED Warning: increasing length may overwrite bits in
-     * final word up to the next word boundary. i.e. D dynamic
-     * array extension semantics are not followed.)
+     * the final word of the current underlying data regardless
+     * of whether it is shared between BitArray objects. i.e. D
+     * dynamic array extension semantics are not followed.)
      */
     @property size_t length(size_t newlen) pure nothrow @system
     {
@@ -1146,9 +1115,35 @@ public:
                 _ptr = b.ptr;
             }
 
+            auto oldlen = _len;
             _len = newlen;
+            if (oldlen < newlen)
+            {
+                auto end = ((oldlen / bitsPerSizeT) + 1) * bitsPerSizeT;
+                if (end > newlen)
+                    end = newlen;
+                this[oldlen .. end] = 0;
+            }
         }
         return _len;
+    }
+
+    // https://issues.dlang.org/show_bug.cgi?id=20240
+    @system unittest
+    {
+        BitArray ba;
+
+        ba.length = 1;
+        ba[0] = 1;
+        ba.length = 0;
+        ba.length = 1;
+        assert(ba[0] == 0); // OK
+
+        ba.length = 2;
+        ba[1] = 1;
+        ba.length = 1;
+        ba.length = 2;
+        assert(ba[1] == 0); // Fail
     }
 
     /**********************************************
@@ -1199,7 +1194,7 @@ public:
       Sets all the values in the `BitArray` to the
       value specified by `val`.
      */
-    void opSliceAssign(bool val)
+    void opSliceAssign(bool val) @nogc pure nothrow
     {
         _ptr[0 .. fullWords] = val ? ~size_t(0) : 0;
         if (endBits)
@@ -1212,7 +1207,7 @@ public:
     }
 
     ///
-    @system unittest
+    @system pure nothrow unittest
     {
         import std.algorithm.comparison : equal;
 
@@ -1232,7 +1227,7 @@ public:
       at index `start` and ends at index ($D end - 1)
       with the values specified by `val`.
      */
-    void opSliceAssign(bool val, size_t start, size_t end)
+    void opSliceAssign(bool val, size_t start, size_t end) @nogc pure nothrow
     in
     {
         assert(start <= end, "start must be less or equal to end");
@@ -1278,7 +1273,7 @@ public:
     }
 
     ///
-    @system unittest
+    @system pure nothrow unittest
     {
         import std.algorithm.comparison : equal;
         import std.range : iota;
@@ -1310,7 +1305,7 @@ public:
     /**
       Flips all the bits in the `BitArray`
      */
-    void flip()
+    void flip() @nogc pure nothrow
     {
         foreach (i; 0 .. fullWords)
             _ptr[i] = ~_ptr[i];
@@ -1320,7 +1315,7 @@ public:
     }
 
     ///
-    @system unittest
+    @system pure nothrow unittest
     {
         import std.algorithm.comparison : equal;
         import std.range : iota;
@@ -1340,13 +1335,13 @@ public:
     /**
       Flips a single bit, specified by `pos`
      */
-    void flip(size_t i)
+    void flip(size_t i) @nogc pure nothrow
     {
         bt(_ptr, i) ? btr(_ptr, i) : bts(_ptr, i);
     }
 
     ///
-    @system unittest
+    @system pure nothrow unittest
     {
         auto ax = BitArray([1, 0, 0, 1]);
         ax.flip(0);
@@ -1362,7 +1357,7 @@ public:
     /**********************************************
      * Counts all the set bits in the `BitArray`
      */
-    size_t count()
+    size_t count() const @nogc pure nothrow
     {
         if (_ptr)
         {
@@ -1379,7 +1374,7 @@ public:
     }
 
     ///
-    @system unittest
+    @system pure nothrow unittest
     {
         auto a = BitArray([0, 1, 1, 0, 0, 1, 1]);
         assert(a.count == 4);
@@ -1789,15 +1784,15 @@ public:
     /***************************************
      * Convert to `void[]`.
      */
-    void[] opCast(T : void[])() @nogc pure nothrow
+    inout(void)[] opCast(T : const void[])() inout @nogc pure nothrow
     {
-        return cast(void[])_ptr[0 .. dim];
+        return cast(inout void[]) _ptr[0 .. dim];
     }
 
     /***************************************
      * Convert to `size_t[]`.
      */
-    size_t[] opCast(T : size_t[])() @nogc pure nothrow
+    inout(size_t)[] opCast(T : const size_t[])() inout @nogc pure nothrow
     {
         return _ptr[0 .. dim];
     }
@@ -1813,6 +1808,34 @@ public:
         size_t[] v = cast(size_t[]) a;
         const blockSize = size_t.sizeof * 8;
         assert(v.length == (a.length + blockSize - 1) / blockSize);
+    }
+
+    // https://issues.dlang.org/show_bug.cgi?id=20606
+    @system unittest
+    {
+        import std.meta : AliasSeq;
+
+        static foreach (alias T; AliasSeq!(void, size_t))
+        {{
+            BitArray m;
+            T[] ma = cast(T[]) m;
+
+            const BitArray c;
+            const(T)[] ca = cast(const T[]) c;
+
+            immutable BitArray i;
+            immutable(T)[] ia = cast(immutable T[]) i;
+
+            // Cross-mutability
+            ca = cast(const T[]) m;
+            ca = cast(const T[]) i;
+
+            // Invalid cast don't compile
+            static assert(!is(typeof(cast(T[]) c)));
+            static assert(!is(typeof(cast(T[]) i)));
+            static assert(!is(typeof(cast(immutable T[]) m)));
+            static assert(!is(typeof(cast(immutable T[]) c)));
+        }}
     }
 
     /***************************************
@@ -2361,7 +2384,7 @@ public:
         }
     }
 
-    // Issue 17467
+    // https://issues.dlang.org/show_bug.cgi?id=17467
     @system unittest
     {
         import std.algorithm.comparison : equal;
@@ -2382,7 +2405,8 @@ public:
         assert(equal(b.bitsSet, iota(64, 128)));
     }
 
-    // Issue 18134 - shifting right when length is a multiple of 8 * size_t.sizeof.
+    // https://issues.dlang.org/show_bug.cgi?id=18134
+    // shifting right when length is a multiple of 8 * size_t.sizeof.
     @system unittest
     {
         import std.algorithm.comparison : equal;
@@ -2523,22 +2547,6 @@ public:
         }
     }
 
-    // @@@DEPRECATED_2.089@@@
-    deprecated("To be removed by 2.089. Please use the writer overload instead.")
-    void toString(scope void delegate(const(char)[]) sink, scope const ref FormatSpec!char fmt) const
-    {
-        const spec = fmt.spec;
-        switch (spec)
-        {
-            case 'b':
-                return formatBitString(sink);
-            case 's':
-                return formatBitArray(sink);
-            default:
-                throw new Exception("Unknown format specifier: %" ~ spec);
-        }
-    }
-
     ///
     @system pure unittest
     {
@@ -2559,12 +2567,16 @@ public:
     @property auto bitsSet() const nothrow
     {
         import std.algorithm.iteration : filter, map, joiner;
-        import std.range : iota;
+        import std.range : iota, chain;
 
-        return iota(dim).
-               filter!(i => _ptr[i])().
-               map!(i => BitsSet!size_t(_ptr[i], i * bitsPerSizeT))().
-               joiner();
+        return chain(
+            iota(fullWords)
+                .filter!(i => _ptr[i])()
+                .map!(i => BitsSet!size_t(_ptr[i], i * bitsPerSizeT))()
+                .joiner(),
+            iota(fullWords * bitsPerSizeT, _len)
+                .filter!(i => this[i])()
+        );
     }
 
     ///
@@ -2604,6 +2616,16 @@ public:
         assert(b.bitsSet.equal(iota(wordBits * 2)));
     }
 
+    // https://issues.dlang.org/show_bug.cgi?id=20241
+    @system unittest
+    {
+        BitArray ba;
+        ba.length = 2;
+        ba[1] = 1;
+        ba.length = 1;
+        assert(ba.bitsSet.empty);
+    }
+
     private void formatBitString(Writer)(auto ref Writer sink) const
     {
         if (!length)
@@ -2640,6 +2662,21 @@ public:
                 put(sink, ", ");
         }
         put(sink, "]");
+    }
+
+    // https://issues.dlang.org/show_bug.cgi?id=20639
+    // Separate @nogc test because public tests use array literals
+    // (and workarounds needlessly uglify those examples)
+    @system @nogc unittest
+    {
+        size_t[2] buffer;
+        BitArray b = BitArray(buffer[], buffer.sizeof * 8);
+
+        b[] = true;
+        b[0 .. 1] = true;
+        b.flip();
+        b.flip(1);
+        cast(void) b.count();
     }
 }
 
@@ -2730,11 +2767,11 @@ public:
 T swapEndian(T)(const T val) @safe pure nothrow @nogc
 if (isIntegral!T || isSomeChar!T || isBoolean!T)
 {
-    import core.bitop : bswap;
+    import core.bitop : bswap, byteswap;
     static if (val.sizeof == 1)
         return val;
     else static if (T.sizeof == 2)
-        return cast(T) (((val & 0xff00U) >> 8) | ((val & 0x00ffU) << 8));
+        return cast(T) byteswap(cast(ushort) val);
     else static if (T.sizeof == 4)
         return cast(T) bswap(cast(uint) val);
     else static if (T.sizeof == 8)
@@ -2793,7 +2830,7 @@ if (isIntegral!T || isSomeChar!T || isBoolean!T)
         static if (isSigned!T)
             assert(swapEndian(swapEndian(cast(T) 0)) == 0);
 
-        // used to trigger BUG6354
+        // used to trigger https://issues.dlang.org/show_bug.cgi?id=6354
         static if (T.sizeof > 1 && isUnsigned!T)
         {
             T left = 0xffU;
@@ -3214,7 +3251,7 @@ if (isFloatOrDouble!T && n == T.sizeof)
 private template isFloatOrDouble(T)
 {
     enum isFloatOrDouble = isFloatingPoint!T &&
-                           !is(Unqual!(FloatingPointTypeOf!T) == real);
+                           !is(immutable FloatingPointTypeOf!T == immutable real);
 }
 
 @safe unittest
@@ -3804,7 +3841,7 @@ if (canSwapEndianness!T && isInputRange!R && is(ElementType!R : const ubyte))
     }
 }
 
-// issue 17247
+// https://issues.dlang.org/show_bug.cgi?id=17247
 @safe unittest
 {
     struct UbyteRange

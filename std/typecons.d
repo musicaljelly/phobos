@@ -5,6 +5,7 @@ This module implements a variety of type constructors, i.e., templates
 that allow construction of new, useful general-purpose types.
 
 $(SCRIPT inhibitQuickIndex = 1;)
+$(DIVC quickindex,
 $(BOOKTABLE,
 $(TR $(TH Category) $(TH Functions))
 $(TR $(TD Tuple) $(TD
@@ -55,7 +56,7 @@ $(TR $(TD Types) $(TD
     $(LREF TypedefType)
     $(LREF UnqualRef)
 ))
-)
+))
 
 Copyright: Copyright the respective authors, 2008-
 License:   $(HTTP boost.org/LICENSE_1_0.txt, Boost License 1.0).
@@ -442,7 +443,7 @@ private enum bool distinctFieldNames(names...) = __traits(compiles,
     static assert(!distinctFieldNames!(string, "abc", string, "abc"));
     static assert(distinctFieldNames!(string, "abc", int, "abd"));
     static assert(!distinctFieldNames!(int, "abc", string, "abd", int, "abc"));
-    // Issue 19240
+    // https://issues.dlang.org/show_bug.cgi?id=19240
     static assert(!distinctFieldNames!(int, "int"));
 }
 
@@ -544,7 +545,7 @@ if (distinctFieldNames!(Specs))
         }
     }
 
-    enum areCompatibleTuples(Tup1, Tup2, string op) = isTuple!Tup2 && is(typeof(
+    enum areCompatibleTuples(Tup1, Tup2, string op) = isTuple!(OriginalType!Tup2) && is(typeof(
     (ref Tup1 tup1, ref Tup2 tup2)
     {
         static assert(tup1.field.length == tup2.field.length);
@@ -590,6 +591,7 @@ if (distinctFieldNames!(Specs))
         ///
         static if (Specs.length == 0) @safe unittest
         {
+            import std.meta : AliasSeq;
             alias Fields = Tuple!(int, "id", string, float);
             static assert(is(Fields.Types == AliasSeq!(int, string, float)));
         }
@@ -602,6 +604,7 @@ if (distinctFieldNames!(Specs))
         ///
         static if (Specs.length == 0) @safe unittest
         {
+            import std.meta : AliasSeq;
             alias Fields = Tuple!(int, "id", string, float);
             static assert(Fields.fieldNames == AliasSeq!("id", "", ""));
         }
@@ -902,7 +905,7 @@ if (distinctFieldNames!(Specs))
         {
             import std.algorithm.mutation : swap;
 
-            static if (is(R : Tuple!Types) && !__traits(isRef, rhs))
+            static if (is(R : Tuple!Types) && !__traits(isRef, rhs) && isTuple!R)
             {
                 if (__ctfe)
                 {
@@ -939,7 +942,7 @@ if (distinctFieldNames!(Specs))
         if (names.length == 0 || allSatisfy!(isSomeString, typeof(names)))
         {
             import std.algorithm.comparison : equal;
-            // to circumvent bug 16418
+            // to circumvent https://issues.dlang.org/show_bug.cgi?id=16418
             static if (names.length == 0 || equal([names], [fieldNames]))
                 return this;
             else
@@ -991,7 +994,7 @@ if (distinctFieldNames!(Specs))
             t2 = tuple(3,4,5);
             auto t2Named = t2.rename!("", "b");
             // "a" no longer has a name
-            static assert(!hasMember!(typeof(t2Named), "a"));
+            static assert(!__traits(hasMember, typeof(t2Named), "a"));
             assert(t2Named[0] == 3);
             assert(t2Named.b == 4);
             assert(t2Named.c == 5);
@@ -1157,7 +1160,8 @@ if (distinctFieldNames!(Specs))
             static assert(
                 (typeof(this).alignof % typeof(return).alignof == 0) &&
                 (expand[from].offsetof % typeof(return).alignof == 0),
-                "Slicing by reference is impossible because of an alignment mistmatch. (See Phobos issue #15645.)");
+                "Slicing by reference is impossible because of an alignment mistmatch" ~
+                " (See https://issues.dlang.org/show_bug.cgi?id=15645).");
 
             return *cast(typeof(return)*) &(field[from]);
         }
@@ -1172,7 +1176,7 @@ if (distinctFieldNames!(Specs))
             static assert(is(typeof(s) == Tuple!(string, float)));
             assert(s[0] == "abc" && s[1] == 4.5);
 
-            // Phobos issue #15645
+            // https://issues.dlang.org/show_bug.cgi?id=15645
             Tuple!(int, short, bool, double) b;
             static assert(!__traits(compiles, b.slice!(2, 4)));
         }
@@ -1191,9 +1195,16 @@ if (distinctFieldNames!(Specs))
                 static if (__traits(compiles, h = .hashOf(field[i])))
                     const k = .hashOf(field[i]);
                 else
+                {
                     // Workaround for when .hashOf is not both @safe and nothrow.
-                    // BUG: Improperly casts away `shared`!
-                    const k = typeid(T).getHash((() @trusted => cast(const void*) &field[i])());
+                    static if (is(T : shared U, U) && __traits(compiles, (U* a) nothrow @safe => .hashOf(*a))
+                            && !__traits(hasMember, T, "toHash"))
+                        // BUG: Improperly casts away `shared`!
+                        const k = .hashOf(*(() @trusted => cast(U*) &field[i])());
+                    else
+                        // BUG: Improperly casts away `shared`!
+                        const k = typeid(T).getHash((() @trusted => cast(const void*) &field[i])());
+                }
                 static if (i == 0)
                     h = k;
                 else
@@ -1401,9 +1412,9 @@ if (distinctFieldNames!(Specs))
     assert(t.expand.only.sum == 3);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=4582
 @safe unittest
 {
-    // Bugzilla 4582
     static assert(!__traits(compiles, Tuple!(string, "id", int, "id")));
     static assert(!__traits(compiles, Tuple!(string, "str", int, "i", string, "str", float)));
 }
@@ -1529,6 +1540,15 @@ if (distinctFieldNames!(Specs))
     auto t = tuple(1, 2);
     assert(t == tuple(1, 2));
     auto t3 = tuple(1, 'd');
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=20850
+// Assignment to enum tuple
+@safe unittest
+{
+    enum T : Tuple!(int*) { a = T(null) }
+    T t;
+    t = T.a;
 }
 
 /**
@@ -1709,7 +1729,7 @@ private template ReverseTupleSpecs(T...)
         ssCopy[1] = ssCopy[0];
         assert(ssCopy[1].count == 2);
     }
-    // bug 2800
+    // https://issues.dlang.org/show_bug.cgi?id=2800
     {
         static struct R
         {
@@ -1729,7 +1749,7 @@ private template ReverseTupleSpecs(T...)
     {
         auto t1 = Tuple!(int, double)(1, 1);
 
-        // 8702
+        // https://issues.dlang.org/show_bug.cgi?id=8702
         auto t8702a = tuple(tuple(1));
         auto t8702b = Tuple!(Tuple!(int))(Tuple!(int)(1));
     }
@@ -1744,19 +1764,19 @@ private template ReverseTupleSpecs(T...)
         // incompatible
         static assert(!__traits(compiles, Tuple!(int, int)(y)));
     }
-    // 6275
+    // https://issues.dlang.org/show_bug.cgi?id=6275
     {
         const int x = 1;
         auto t1 = tuple(x);
         alias T = Tuple!(const(int));
         auto t2 = T(1);
     }
-    // 9431
+    // https://issues.dlang.org/show_bug.cgi?id=9431
     {
         alias T = Tuple!(int[1][]);
         auto t = T([[10]]);
     }
-    // 7666
+    // https://issues.dlang.org/show_bug.cgi?id=7666
     {
         auto tup = tuple(1, "2");
         assert(tup.reverse == tuple("2", 1));
@@ -1795,8 +1815,9 @@ private template ReverseTupleSpecs(T...)
         static assert( is(typeof(tc2 == tm2)));
         static assert( is(typeof(tc2 == tc2)));
 
+        // https://issues.dlang.org/show_bug.cgi?id=8686
         struct Equ3 { bool opEquals(T)(T) { return true; } }
-        auto  tm3 = tuple(Equ3.init);           // bugzilla 8686
+        auto  tm3 = tuple(Equ3.init);
         const tc3 = tuple(Equ3.init);
         static assert( is(typeof(tm3 == tm3)));
         static assert( is(typeof(tm3 == tc3)));
@@ -1845,7 +1866,7 @@ private template ReverseTupleSpecs(T...)
         static assert( is(typeof(tc4 < tm4)));
         static assert( is(typeof(tc4 < tc4)));
     }
-    // Bugzilla 14890
+    // https://issues.dlang.org/show_bug.cgi?id=14890
     static void test14890(inout int[] dummy)
     {
         alias V = Tuple!(int, int);
@@ -1887,7 +1908,7 @@ private template ReverseTupleSpecs(T...)
 }
 @safe unittest
 {
-    // Bugzilla 10686
+    // https://issues.dlang.org/show_bug.cgi?id=10686
     immutable Tuple!(int) t1;
     auto r1 = t1[0]; // OK
     immutable Tuple!(int, "x") t2;
@@ -1897,7 +1918,7 @@ private template ReverseTupleSpecs(T...)
 {
     import std.exception : assertCTFEable;
 
-    // Bugzilla 10218
+    // https://issues.dlang.org/show_bug.cgi?id=10218
     assertCTFEable!(
     {
         auto t = tuple(1);
@@ -1932,7 +1953,7 @@ private template ReverseTupleSpecs(T...)
     TISIS e = TISIS(ss);
 }
 
-// Bugzilla #9819
+// https://issues.dlang.org/show_bug.cgi?id=9819
 @safe unittest
 {
     alias T = Tuple!(int, "x", double, "foo");
@@ -1943,7 +1964,7 @@ private template ReverseTupleSpecs(T...)
     static assert(Fields.fieldNames == AliasSeq!("id", "", ""));
 }
 
-// Bugzilla 13837
+// https://issues.dlang.org/show_bug.cgi?id=13837
 @safe unittest
 {
     // New behaviour, named arguments.
@@ -1979,7 +2000,7 @@ private template ReverseTupleSpecs(T...)
 
 @safe unittest
 {
-    class C {}
+    class C { override size_t toHash() const nothrow @safe { return 0; } }
     Tuple!(Rebindable!(const C)) a;
     Tuple!(const C) b;
     a = b;
@@ -2001,7 +2022,7 @@ private template ReverseTupleSpecs(T...)
     //static assert(tupStr == `Tuple!(int, double)(1, 1)`);
 }
 
-// Issue 17803, parte uno
+// https://issues.dlang.org/show_bug.cgi?id=17803, parte uno
 @safe unittest
 {
     auto a = tuple(3, "foo");
@@ -2262,7 +2283,8 @@ if (is(T == class) || is(T == interface) || isDynamicArray!T || isAssociativeArr
     a = new Widget;
 }
 
-@safe unittest // issue 16054
+// https://issues.dlang.org/show_bug.cgi?id=16054
+@safe unittest
 {
     Rebindable!(immutable Object) r;
     static assert(__traits(compiles, r.get()));
@@ -2280,7 +2302,9 @@ if (is(T == class) || is(T == interface) || isDynamicArray!T || isAssociativeArr
         ~ " by forwarding to A.toHash().");
 }
 
-@system unittest // issue 18615: Rebindable!A should use A.opEquals
+// https://issues.dlang.org/show_bug.cgi?id=18615
+// Rebindable!A should use A.opEqualsa
+@system unittest
 {
     class CustomOpEq
     {
@@ -2325,7 +2349,8 @@ if (is(T == class) || is(T == interface) || isDynamicArray!T || isAssociativeArr
         ~ " comparable against Object itself and use Object.opEquals.");
 }
 
-@safe unittest // issue 18755
+// https://issues.dlang.org/show_bug.cgi?id=18755
+@safe unittest
 {
     static class Foo
     {
@@ -2486,7 +2511,7 @@ Rebindable!T rebindable(T)(Rebindable!T obj)
     assert(rebindable(arr) == arr);
     assert(rebindable(arrConst) == arr);
 
-    // Issue 7654
+    // https://issues.dlang.org/show_bug.cgi?id=7654
     immutable(char[]) s7654;
     Rebindable!(typeof(s7654)) r7654 = s7654;
 
@@ -2497,7 +2522,7 @@ Rebindable!T rebindable(T)(Rebindable!T obj)
         static assert(is(Rebindable!(T[]) == T[]));
     }
 
-    // Issue 12046
+    // https://issues.dlang.org/show_bug.cgi?id=12046
     static assert(!__traits(compiles, Rebindable!(int[1])));
     static assert(!__traits(compiles, Rebindable!(const int[1])));
 
@@ -2521,10 +2546,10 @@ Rebindable!T rebindable(T)(Rebindable!T obj)
 template UnqualRef(T)
 if (is(T == class) || is(T == interface))
 {
-    static if (is(T == const U, U)
-        || is(T == immutable U, U)
-        || is(T == shared U, U)
-        || is(T == const shared U, U))
+    static if (is(T == immutable U, U)
+        || is(T == const shared U, U)
+        || is(T == const U, U)
+        || is(T == shared U, U))
     {
         struct UnqualRef
         {
@@ -2629,13 +2654,13 @@ string alignForSize(E...)(const char[][] names...)
 
     enum passAbnormalX = x == "int[] x;\ndouble[5] w;\nshort z;\nchar[3] y;\n";
     enum passAbnormalY = y == "Foo y;\ndouble z;\nubyte x;\n";
-    // ^ blame http://d.puremagic.com/issues/show_bug.cgi?id=231
+    // ^ blame https://issues.dlang.org/show_bug.cgi?id=231
 
     static assert(passNormalX || passAbnormalX && double.alignof <= (int[]).alignof);
     static assert(passNormalY || passAbnormalY && double.alignof <= int.alignof);
 }
 
-// Issue 12914
+// https://issues.dlang.org/show_bug.cgi?id=12914
 @safe unittest
 {
     immutable string[] fieldNames = ["x", "y"];
@@ -2664,12 +2689,12 @@ struct Nullable(T)
 
     private bool _isNull = true;
 
-/**
-Constructor initializing `this` with `value`.
-
-Params:
-    value = The value to initialize this `Nullable` with.
- */
+    /**
+     * Constructor initializing `this` with `value`.
+     *
+     * Params:
+     *     value = The value to initialize this `Nullable` with.
+     */
     this(inout T value) inout
     {
         _value.payload = value;
@@ -2688,10 +2713,10 @@ Params:
     }
 
     /**
-      If they are both null, then they are equal. If one is null and the other
-      is not, then they are not equal. If they are both non-null, then they are
-      equal if their values are equal.
-      */
+     * If they are both null, then they are equal. If one is null and the other
+     * is not, then they are not equal. If they are both non-null, then they are
+     * equal if their values are equal.
+     */
     bool opEquals()(auto ref const(typeof(this)) rhs) const
     {
         if (_isNull)
@@ -2703,7 +2728,7 @@ Params:
 
     /// Ditto
     bool opEquals(U)(auto ref const(U) rhs) const
-    if (is(typeof(this.get == rhs)))
+    if (!is(U : typeof(this)) && is(typeof(this.get == rhs)))
     {
         return _isNull ? false : rhs == _value.payload;
     }
@@ -2751,7 +2776,7 @@ Params:
         assert(a != Nullable!int(29));
     }
 
-    // Issue 17482
+    // https://issues.dlang.org/show_bug.cgi?id=17482
     @system unittest
     {
         import std.variant : Variant;
@@ -2824,81 +2849,52 @@ Params:
             formatValue(writer, _value.payload, fmt);
     }
 
-    //@@@DEPRECATED_2.086@@@
-    deprecated("To be removed after 2.086. Please use the output range overload instead.")
-    void toString()(scope void delegate(const(char)[]) sink, scope const ref FormatSpec!char fmt)
-    {
-        if (isNull)
-        {
-            sink.formatValue("Nullable.null", fmt);
-        }
-        else
-        {
-            sink.formatValue(_value.payload, fmt);
-        }
-    }
-
-    // Issue 14940
-    //@@@DEPRECATED_2.086@@@
-    deprecated("To be removed after 2.086. Please use the output range overload instead.")
-    void toString()(scope void delegate(const(char)[]) @safe sink, scope const ref FormatSpec!char fmt)
-    {
-        if (isNull)
-        {
-            sink.formatValue("Nullable.null", fmt);
-        }
-        else
-        {
-            sink.formatValue(_value.payload, fmt);
-        }
-    }
-
-/**
-Check if `this` is in the null state.
-
-Returns:
-    true $(B iff) `this` is in the null state, otherwise false.
- */
+    /**
+     * Check if `this` is in the null state.
+     *
+     * Returns:
+     *     true $(B iff) `this` is in the null state, otherwise false.
+     */
     @property bool isNull() const @safe pure nothrow
     {
         return _isNull;
     }
 
-///
-@safe unittest
-{
-    Nullable!int ni;
-    assert(ni.isNull);
+    ///
+    @safe unittest
+    {
+        Nullable!int ni;
+        assert(ni.isNull);
 
-    ni = 0;
-    assert(!ni.isNull);
-}
+        ni = 0;
+        assert(!ni.isNull);
+    }
 
-// Issue 14940
-@safe unittest
-{
-    import std.array : appender;
-    import std.format : formattedWrite;
+    // https://issues.dlang.org/show_bug.cgi?id=14940
+    @safe unittest
+    {
+        import std.array : appender;
+        import std.format : formattedWrite;
 
-    auto app = appender!string();
-    Nullable!int a = 1;
-    formattedWrite(app, "%s", a);
-    assert(app.data == "1");
-}
+        auto app = appender!string();
+        Nullable!int a = 1;
+        formattedWrite(app, "%s", a);
+        assert(app.data == "1");
+    }
 
-// Issue 19799
-@safe unittest
-{
-    import std.format : format;
+    // https://issues.dlang.org/show_bug.cgi?id=19799
+    @safe unittest
+    {
+        import std.format : format;
 
-    const Nullable!string a = const(Nullable!string)();
+        const Nullable!string a = const(Nullable!string)();
 
-    format!"%s"(a);
-}
+        format!"%s"(a);
+    }
 
-/**
-Forces `this` to the null state.
- */
+    /**
+     * Forces `this` to the null state.
+     */
     void nullify()()
     {
         static if (is(T == class) || is(T == interface))
@@ -2908,23 +2904,23 @@ Forces `this` to the null state.
         _isNull = true;
     }
 
-///
-@safe unittest
-{
-    Nullable!int ni = 0;
-    assert(!ni.isNull);
+    ///
+    @safe unittest
+    {
+        Nullable!int ni = 0;
+        assert(!ni.isNull);
 
-    ni.nullify();
-    assert(ni.isNull);
-}
+        ni.nullify();
+        assert(ni.isNull);
+    }
 
-/**
-Assigns `value` to the internally-held state. If the assignment
-succeeds, `this` becomes non-null.
-
-Params:
-    value = A value of type `T` to assign to this `Nullable`.
- */
+    /**
+     * Assigns `value` to the internally-held state. If the assignment
+     * succeeds, `this` becomes non-null.
+     *
+     * Params:
+     *     value = A value of type `T` to assign to this `Nullable`.
+     */
     void opAssign()(T value)
     {
         import std.algorithm.mutation : moveEmplace, move;
@@ -2945,37 +2941,40 @@ Params:
         _isNull = false;
     }
 
-/**
-    If this `Nullable` wraps a type that already has a null value
-    (such as a pointer), then assigning the null value to this
-    `Nullable` is no different than assigning any other value of
-    type `T`, and the resulting code will look very strange. It
-    is strongly recommended that this be avoided by instead using
-    the version of `Nullable` that takes an additional `nullValue`
-    template argument.
- */
-@safe unittest
-{
-    //Passes
-    Nullable!(int*) npi;
-    assert(npi.isNull);
+    /**
+     * If this `Nullable` wraps a type that already has a null value
+     * (such as a pointer), then assigning the null value to this
+     * `Nullable` is no different than assigning any other value of
+     * type `T`, and the resulting code will look very strange. It
+     * is strongly recommended that this be avoided by instead using
+     * the version of `Nullable` that takes an additional `nullValue`
+     * template argument.
+     */
+    @safe unittest
+    {
+        //Passes
+        Nullable!(int*) npi;
+        assert(npi.isNull);
 
-    //Passes?!
-    npi = null;
-    assert(!npi.isNull);
-}
+        //Passes?!
+        npi = null;
+        assert(!npi.isNull);
+    }
 
-/**
-Gets the value if not null. If `this` is in the null state, and the optional
-parameter `fallback` was provided, it will be returned. Without `fallback`,
-calling `get` with a null state is invalid.
-
-Params:
-    fallback = the value to return in case the `Nullable` is null.
-
-Returns:
-    The value held internally by this `Nullable`.
- */
+    /**
+     * Gets the value if not null. If `this` is in the null state, and the optional
+     * parameter `fallback` was provided, it will be returned. Without `fallback`,
+     * calling `get` with a null state is invalid.
+     *
+     * When the fallback type is different from the Nullable type, `get(T)` returns
+     * the common type.
+     *
+     * Params:
+     *     fallback = the value to return in case the `Nullable` is null.
+     *
+     * Returns:
+     *     The value held internally by this `Nullable`.
+     */
     @property ref inout(T) get() inout @safe pure nothrow
     {
         enum message = "Called `get' on null Nullable!" ~ T.stringof ~ ".";
@@ -2984,30 +2983,36 @@ Returns:
     }
 
     /// ditto
-    @property get(U)(inout(U) fallback) inout @safe pure nothrow
+    @property inout(T) get()(inout(T) fallback) inout @safe pure nothrow
     {
         return isNull ? fallback : _value.payload;
     }
 
-//@@@DEPRECATED_2.096@@@
-deprecated(
-    "Implicit conversion with `alias Nullable.get this` will be removed after 2.096. Please use `.get` explicitly.")
-@system unittest
-{
-    import core.exception : AssertError;
-    import std.exception : assertThrown, assertNotThrown;
+    /// ditto
+    @property auto get(U)(inout(U) fallback) inout @safe pure nothrow
+    {
+        return isNull ? fallback : _value.payload;
+    }
 
-    Nullable!int ni;
-    int i = 42;
-    //`get` is implicitly called. Will throw
-    //an AssertError in non-release mode
-    assertThrown!AssertError(i = ni);
-    assert(i == 42);
+    //@@@DEPRECATED_2.096@@@
+    deprecated(
+        "Implicit conversion with `alias Nullable.get this` will be removed after 2.096. Please use `.get` explicitly.")
+    @system unittest
+    {
+        import core.exception : AssertError;
+        import std.exception : assertThrown, assertNotThrown;
 
-    ni = 5;
-    assertNotThrown!AssertError(i = ni);
-    assert(i == 5);
-}
+        Nullable!int ni;
+        int i = 42;
+        //`get` is implicitly called. Will throw
+        //an AssertError in non-release mode
+        assertThrown!AssertError(i = ni);
+        assert(i == 42);
+
+        ni = 5;
+        assertNotThrown!AssertError(i = ni);
+        assert(i == 5);
+    }
 
     //@@@DEPRECATED_2.096@@@
     deprecated(
@@ -3017,24 +3022,24 @@ deprecated(
         return get;
     }
 
-///
-@safe pure nothrow unittest
-{
-    int i = 42;
-    Nullable!int ni;
-    int x = ni.get(i);
-    assert(x == i);
+    ///
+    @safe pure nothrow unittest
+    {
+        int i = 42;
+        Nullable!int ni;
+        int x = ni.get(i);
+        assert(x == i);
 
-    ni = 7;
-    x = ni.get(i);
-    assert(x == 7);
-}
+        ni = 7;
+        x = ni.get(i);
+        assert(x == 7);
+    }
 
-/**
-Implicitly converts to `T`.
-`this` must not be in the null state.
-This feature is deprecated and will be removed after 2.096.
- */
+    /**
+     * Implicitly converts to `T`.
+     * `this` must not be in the null state.
+     * This feature is deprecated and will be removed after 2.096.
+     */
     alias get_ this;
 }
 
@@ -3182,9 +3187,10 @@ deprecated(
     s.nullify();
     assert(s.isNull);
 }
+
+// https://issues.dlang.org/show_bug.cgi?id=9404
 @safe unittest
 {
-    // Bugzilla 9404
     alias N = Nullable!int;
 
     void foo(N a)
@@ -3280,9 +3286,10 @@ deprecated(
         c = a;
     }}
 }
+
+// https://issues.dlang.org/show_bug.cgi?id=10268
 @system unittest
 {
-    // Bugzilla 10268
     import std.json;
     JSONValue value = null;
     auto na = Nullable!JSONValue(value);
@@ -3331,18 +3338,20 @@ deprecated(
         assert(*x4.get.val == 10);
     }
 }
+
+// https://issues.dlang.org/show_bug.cgi?id=10357
 @safe unittest
 {
-    // Bugzila 10357
     import std.datetime;
     Nullable!SysTime time = SysTime(0);
 }
+
+// https://issues.dlang.org/show_bug.cgi?id=10915
 @system unittest
 {
     import std.conv : to;
     import std.array;
 
-    // Bugzilla 10915
     Appender!string buffer;
 
     Nullable!int ni;
@@ -3381,7 +3390,7 @@ deprecated(
     assert(ntts.to!string() == "2.5");
 }
 
-// Bugzilla 14477
+// https://issues.dlang.org/show_bug.cgi?id=14477
 @safe unittest
 {
     static struct DisabledDefaultConstructor
@@ -3394,7 +3403,7 @@ deprecated(
     var.nullify;
 }
 
-// Issue 17440
+// https://issues.dlang.org/show_bug.cgi?id=17440
 @system unittest
 {
     static interface I { }
@@ -3419,7 +3428,7 @@ deprecated(
     assert(c.canary == 0xA71FE);
 }
 
-// bugzilla issue 19037
+// https://issues.dlang.org/show_bug.cgi?id=19037
 @safe unittest
 {
     import std.datetime : SysTime;
@@ -3562,7 +3571,7 @@ Params:
     template toString()
     {
         import std.format : FormatSpec, formatValue;
-        // Needs to be a template because of DMD @@BUG@@ 13737.
+        // Needs to be a template because of https://issues.dlang.org/show_bug.cgi?id=13737.
         void toString()(scope void delegate(const(char)[]) sink, scope const ref FormatSpec!char fmt)
         {
             if (isNull)
@@ -3797,7 +3806,8 @@ if (is (typeof(nullValue) == T))
 
 @nogc nothrow pure @safe unittest
 {
-    // issue 19226 - fully handle non-self-equal nullValue
+    // https://issues.dlang.org/show_bug.cgi?id=19226
+    // fully handle non-self-equal nullValue
     static struct Fraction
     {
         int denominator;
@@ -3888,7 +3898,7 @@ if (is (typeof(nullValue) == T))
 {
     import std.conv : to;
 
-    // Bugzilla 10915
+    // https://issues.dlang.org/show_bug.cgi?id=10915
     Nullable!(int, 1) ni = 1;
     assert(ni.to!string() == "Nullable.null");
 
@@ -3963,11 +3973,11 @@ template apply(alias fun)
         {
             static if (MustWrapReturn)
             {
-                return fun(t.get).nullable;
+                return unaryFun!fun(t.get).nullable;
             }
             else
             {
-                return fun(t.get);
+                return unaryFun!fun(t.get);
             }
         }
         else
@@ -4019,6 +4029,33 @@ nothrow pure @nogc @safe unittest
     assert(result.get == 4);
 }
 
+// test that Nullable.get(default) can merge types
+@safe @nogc nothrow pure
+unittest
+{
+    Nullable!ubyte sample = Nullable!ubyte();
+
+    // Test that get(U) returns the common type of the Nullable type and the parameter type.
+    assert(sample.get(1000) == 1000);
+}
+
+// Workaround for https://issues.dlang.org/show_bug.cgi?id=20670
+@safe @nogc nothrow pure
+unittest
+{
+    immutable struct S { }
+
+    S[] array = Nullable!(S[])().get(S[].init);
+}
+
+// regression test for https://issues.dlang.org/show_bug.cgi?id=21199
+@safe @nogc nothrow pure
+unittest
+{
+    struct S { int i; }
+    assert(S(5).nullable.apply!"a.i" == 5);
+}
+
 /**
 Just like `Nullable!T`, except that the object refers to a value
 sitting elsewhere in memory. This makes assignments overwrite the
@@ -4043,7 +4080,7 @@ Params:
     template toString()
     {
         import std.format : FormatSpec, formatValue;
-        // Needs to be a template because of DMD @@BUG@@ 13737.
+        // Needs to be a template because of https://issues.dlang.org/show_bug.cgi?id=13737.
         void toString()(scope void delegate(const(char)[]) sink, scope const ref FormatSpec!char fmt)
         {
             if (isNull)
@@ -4290,11 +4327,12 @@ auto nullableRef(T)(T* t)
         c = a;
     }}
 }
+
+// https://issues.dlang.org/show_bug.cgi?id=10915
 @system unittest
 {
     import std.conv : to;
 
-    // Bugzilla 10915
     NullableRef!int nri;
     assert(nri.to!string() == "Nullable.null");
 
@@ -4396,12 +4434,23 @@ alias BlackHole(Base) = AutoImplement!(Base, generateEmptyFunction, isAbstractFu
         c.doSomething();
     }
 
-    // Bugzilla 12058
+    // https://issues.dlang.org/show_bug.cgi?id=12058
     interface Foo
     {
         inout(Object) foo() inout;
     }
     BlackHole!Foo o;
+}
+
+nothrow pure @nogc @safe unittest
+{
+    static interface I
+    {
+        I foo() nothrow pure @nogc @safe return scope;
+    }
+
+    scope cb = new BlackHole!I();
+    cb.foo();
 }
 
 
@@ -4437,10 +4486,25 @@ alias WhiteHole(Base) = AutoImplement!(Base, generateAssertTrap, isAbstractFunct
     assertThrown!NotImplementedError(c.notYetImplemented()); // throws an Error
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=20232
+nothrow pure @safe unittest
+{
+    static interface I
+    {
+        I foo() nothrow pure @safe return scope;
+    }
+
+    if (0) // Just checking attribute interference
+    {
+        scope cw = new WhiteHole!I();
+        cw.foo();
+    }
+}
+
 // / ditto
 class NotImplementedError : Error
 {
-    this(string method)
+    this(string method) nothrow pure @safe
     {
         super(method ~ " is not implemented");
     }
@@ -4680,7 +4744,7 @@ private static:
     //:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::://
 
     // Add a non-final check to the cherrypickMethod.
-    enum bool canonicalPicker(fun.../+[BUG 4217]+/) =
+    enum bool canonicalPicker(fun.../+[https://issues.dlang.org/show_bug.cgi?id=4217]+/) =
         !__traits(isFinalFunction, fun[0]) && cherrypickMethod!(fun);
 
     /*
@@ -4782,7 +4846,7 @@ private static:
         mixin CommonGeneratingPolicy;
 
         /* Generates constructor body.  Just forward to the base class' one. */
-        string generateFunctionBody(ctor.../+[BUG 4217]+/)() @property
+        string generateFunctionBody(ctor.../+[https://issues.dlang.org/show_bug.cgi?id=4217]+/)() @property
         {
             enum varstyle = variadicFunctionStyle!(typeof(&ctor[0]));
 
@@ -4803,7 +4867,7 @@ private static:
         mixin CommonGeneratingPolicy;
 
         /* Geneartes method body. */
-        string generateFunctionBody(func.../+[BUG 4217]+/)() @property
+        string generateFunctionBody(func.../+[https://issues.dlang.org/show_bug.cgi?id=4217]+/)() @property
         {
             return generateMethodBody!(Base, func); // given
         }
@@ -4934,7 +4998,8 @@ private static:
     }
     /+ // deep inheritance
     {
-    // XXX [BUG 2525,3525]
+    // https://issues.dlang.org/show_bug.cgi?id=2525
+    // https://issues.dlang.org/show_bug.cgi?id=3525
     // NOTE: [r494] func.c(504-571) FuncDeclaration::semantic()
         interface I { void foo(); }
         interface J : I {}
@@ -4944,7 +5009,9 @@ private static:
     }+/
 }
 
-// Issue 17177 - AutoImplement fails on function overload sets with "cannot infer type from overloaded function symbol"
+// https://issues.dlang.org/show_bug.cgi?id=17177
+// AutoImplement fails on function overload sets with
+// "cannot infer type from overloaded function symbol"
 @system unittest
 {
     static class Issue17177
@@ -4986,10 +5053,11 @@ private static:
     alias Implementation = AutoImplement!(Issue17177, how, templateNot!isFinalFunction);
 }
 
-version (unittest)
+version (StdUnittest)
 {
-    // Issue 10647
-    // Add prefix "issue10647_" as a workaround for issue 1238
+    // https://issues.dlang.org/show_bug.cgi?id=10647
+    // Add prefix "issue10647_" as a workaround for
+    // https://issues.dlang.org/show_bug.cgi?id=1238
     private string issue10647_generateDoNothing(C, alias fun)() @property
     {
         string stmt;
@@ -5083,6 +5151,7 @@ private static:
     // Internal stuffs
     //:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::://
     import std.format;
+    alias format = std.format.format;
 
     enum CONSTRUCTOR_NAME = "__ctor";
 
@@ -5140,7 +5209,8 @@ private static:
                 // declaration here to reveal possible hidden functions.
                 code ~= format("alias %s = %s.%s;\n",
                             oset.name,
-                            Policy.BASE_CLASS_ID, // [BUG 2540] super.
+                            // super: https://issues.dlang.org/show_bug.cgi?id=2540
+                            Policy.BASE_CLASS_ID,
                             oset.name);
             }
         }
@@ -5213,6 +5283,8 @@ private static:
                 if (atts & FA.property) poatts ~= " @property";
                 if (atts & FA.safe    ) poatts ~= " @safe";
                 if (atts & FA.trusted ) poatts ~= " @trusted";
+                if (atts & FA.scope_ )  poatts ~= " scope";
+                if (atts & FA.return_ ) poatts ~= " return";
                 return poatts;
             }
             enum postAtts = make_postAtts();
@@ -5291,6 +5363,7 @@ private static:
 
             // Parameter storage classes.
             if (stc & STC.scope_) params ~= "scope ";
+            if (stc & STC.in_)    params ~= "in ";
             if (stc & STC.out_  ) params ~= "out ";
             if (stc & STC.ref_  ) params ~= "ref ";
             if (stc & STC.lazy_ ) params ~= "lazy ";
@@ -5344,7 +5417,7 @@ private static:
 Predefined how-policies for `AutoImplement`.  These templates are also used by
 `BlackHole` and `WhiteHole`, respectively.
  */
-template generateEmptyFunction(C, func.../+[BUG 4217]+/)
+template generateEmptyFunction(C, func.../+[https://issues.dlang.org/show_bug.cgi?id=4217]+/)
 {
     static if (is(ReturnType!(func) == void))
         enum string generateEmptyFunction = q{
@@ -5494,7 +5567,7 @@ if (Targets.length >= 1 && allSatisfy!(isMutable, Targets))
             alias type = F;
         }
 
-        // issue 12064: Remove NVI members
+        // https://issues.dlang.org/show_bug.cgi?id=12064: Remove NVI members
         template OnlyVirtual(members...)
         {
             enum notFinal(alias T) = !__traits(isFinalFunction, T);
@@ -5829,9 +5902,10 @@ private interface Structural
         assert(d.draw(10) == 10);
     }
 }
+
+// https://issues.dlang.org/show_bug.cgi?id=10377
 @system unittest
 {
-    // Bugzilla 10377
     import std.range, std.algorithm;
 
     interface MyInputRange(T)
@@ -5846,9 +5920,10 @@ private interface Structural
     auto r = iota(0,10,1).inputRangeObject().wrap!(MyInputRange!int)();
     assert(equal(r, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
 }
+
+// https://issues.dlang.org/show_bug.cgi?id=10536
 @system unittest
 {
-    // Bugzilla 10536
     interface Interface
     {
         int foo();
@@ -5880,7 +5955,8 @@ private interface Structural
     assert(i.bar(10) == 100);
 }
 
-@system unittest // issue 12064
+// https://issues.dlang.org/show_bug.cgi?id=12064
+@system unittest
 {
     interface I
     {
@@ -5999,16 +6075,14 @@ private template TypeMod(T)
     enum TypeMod = cast(TypeModifier)(mod1 | mod2);
 }
 
-version (unittest)
+@system unittest
 {
-    private template UnittestFuncInfo(alias f)
+    template UnittestFuncInfo(alias f)
     {
         enum name = __traits(identifier, f);
         alias type = FunctionTypeOf!f;
     }
-}
-@system unittest
-{
+
     class A
     {
         int draw() { return 1; }
@@ -6243,7 +6317,8 @@ if (!is(T == class) && !(is(T == interface)))
         private enum enableGCScan = hasIndirections!T;
     }
 
-    extern(C) private pure nothrow @nogc static // TODO remove pure when https://issues.dlang.org/show_bug.cgi?id=15862 has been fixed
+    // TODO remove pure when https://issues.dlang.org/show_bug.cgi?id=15862 has been fixed
+    extern(C) private pure nothrow @nogc static
     {
         pragma(mangle, "free") void pureFree( void *ptr );
         static if (enableGCScan)
@@ -6269,6 +6344,7 @@ if (!is(T == class) && !(is(T == interface)))
             import std.conv : emplace;
 
             allocateStore();
+            version (D_Exceptions) scope(failure) deallocateStore();
             emplace(&_store._payload, args);
             _store._count = 1;
         }
@@ -6296,6 +6372,16 @@ if (!is(T == class) && !(is(T == interface)))
                 import std.internal.memory : enforceMalloc;
                 _store = cast(Impl*) enforceMalloc(Impl.sizeof);
             }
+        }
+
+        private void deallocateStore() nothrow pure
+        {
+            static if (enableGCScan)
+            {
+                pureGcRemoveRange(&this._store._payload);
+            }
+            pureFree(_store);
+            _store = null;
         }
 
         /**
@@ -6343,6 +6429,11 @@ Constructor that initializes the payload.
 Postcondition: `refCountedStore.isInitialized`
  */
     this(A...)(auto ref A args) if (A.length > 0)
+    out
+    {
+        assert(refCountedStore.isInitialized);
+    }
+    do
     {
         _refCounted.initialize(args);
     }
@@ -6375,15 +6466,9 @@ to deallocate the corresponding resource.
         assert(_refCounted._store._count > 0);
         if (--_refCounted._store._count)
             return;
-        // Done, deallocate
+        // Done, destroy and deallocate
         .destroy(_refCounted._store._payload);
-        static if (enableGCScan)
-        {
-            pureGcRemoveRange(&_refCounted._store._payload);
-        }
-
-        pureFree(_refCounted._store);
-        _refCounted._store = null;
+        _refCounted.deallocateStore();
     }
 
 /**
@@ -6517,7 +6602,8 @@ pure @system unittest
     }
     auto a = A(4);
     auto b = a.copy();
-    assert(a.x._refCounted._store._count == 2, "BUG 4356 still unfixed");
+    assert(a.x._refCounted._store._count == 2,
+           "https://issues.dlang.org/show_bug.cgi?id=4356 still unfixed");
 }
 
 @betterC pure @system nothrow @nogc unittest
@@ -6528,7 +6614,7 @@ pure @system unittest
     swap(p1, p2);
 }
 
-// 6606
+// https://issues.dlang.org/show_bug.cgi?id=6606
 @betterC @safe pure nothrow @nogc unittest
 {
     union U {
@@ -6543,7 +6629,7 @@ pure @system unittest
     alias SRC = RefCounted!S;
 }
 
-// 6436
+// https://issues.dlang.org/show_bug.cgi?id=6436
 @betterC @system pure unittest
 {
     struct S { this(ref int val) { assert(val == 3); ++val; } }
@@ -6694,7 +6780,7 @@ mixin template Proxy(alias a)
 
         static if (accessibleFrom!(const typeof(this)))
         {
-            override hash_t toHash() const nothrow @safe
+            override size_t toHash() const nothrow @safe
             {
                 static if (__traits(compiles, .hashOf(a)))
                     return .hashOf(a);
@@ -6724,7 +6810,6 @@ mixin template Proxy(alias a)
         }
 
         auto ref opCmp(this X, B)(auto ref B b)
-          if (!is(typeof(a.opCmp(b))) || !is(typeof(b.opCmp(a))))
         {
             static if (is(typeof(a.opCmp(b))))
                 return a.opCmp(b);
@@ -6738,7 +6823,7 @@ mixin template Proxy(alias a)
 
         static if (accessibleFrom!(const typeof(this)))
         {
-            hash_t toHash() const nothrow @safe
+            size_t toHash() const nothrow @safe
             {
                 static if (__traits(compiles, .hashOf(a)))
                     return .hashOf(a);
@@ -6800,7 +6885,7 @@ mixin template Proxy(alias a)
 
     auto ref opOpAssign     (string op, this X, V      )(auto ref V v)
     {
-        return mixin("a "      ~op~"= v");
+        return mixin("a = a "~op~" v");
     }
     auto ref opIndexOpAssign(string op, this X, V, D...)(auto ref V v, auto ref D i)
     {
@@ -7100,7 +7185,7 @@ mixin template Proxy(alias a)
     h.ifti2(4);
     h.ifti3!int(4, 3);
 
-    // bug5896 test
+    // https://issues.dlang.org/show_bug.cgi?id=5896 test
     assert(h.opCast!int() == 0);
     assert(cast(int) h == 0);
     const ih = new const Hoge(new Foo());
@@ -7261,9 +7346,10 @@ mixin template Proxy(alias a)
     MyFoo2 f2;
     f2 = f2;
 }
+
+// https://issues.dlang.org/show_bug.cgi?id=8613
 @safe unittest
 {
-    // bug8613
     static struct Name
     {
         mixin Proxy!val;
@@ -7286,7 +7372,8 @@ private enum isDIP1000 = __traits(compiles, () @safe {
 static if (isDIP1000) {} else
 @system unittest
 {
-    // bug14213, using function for the payload
+    // https://issues.dlang.org/show_bug.cgi?id=14213
+    // using function for the payload
     static struct S
     {
         int foo() { return 12; }
@@ -7309,7 +7396,7 @@ static if (isDIP1000) {} else
 
 // Check all floating point comparisons for both Proxy and Typedef,
 // also against int and a Typedef!int, to be as regression-proof
-// as possible. bug 15561
+// as possible. https://issues.dlang.org/show_bug.cgi?id=15561
 @safe unittest
 {
     static struct MyFloatImpl
@@ -7374,7 +7461,8 @@ struct Typedef(T, T init = T.init, string cookie=null)
 {
     private T Typedef_payload = init;
 
-    // issue 18415 : prevent default construction if original type does too.
+    // https://issues.dlang.org/show_bug.cgi?id=18415
+    // prevent default construction if original type does too.
     static if ((is(T == struct) || is(T == union)) && !is(typeof({T t;})))
     {
         @disable this();
@@ -7521,6 +7609,16 @@ struct Typedef(T, T init = T.init, string cookie=null)
     static assert(!is(MoneyEuros == MoneyDollars));
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=12461
+@safe unittest
+{
+    alias Int = Typedef!int;
+
+    Int a, b;
+    a += b;
+    assert(a == 0);
+}
+
 /**
 Get the underlying type which a `Typedef` wraps.
 If `T` is not a `Typedef` it will alias itself to `T`.
@@ -7620,7 +7718,8 @@ template TypedefType(T)
     assert(drange3[$] == 123);
 }
 
-@safe @nogc pure nothrow unittest // Bugzilla 18415
+// https://issues.dlang.org/show_bug.cgi?id=18415
+@safe @nogc pure nothrow unittest
 {
     struct NoDefCtorS{@disable this();}
     union NoDefCtorU{@disable this();}
@@ -7628,7 +7727,8 @@ template TypedefType(T)
     static assert(!is(typeof({Typedef!NoDefCtorU u;})));
 }
 
-@safe @nogc pure nothrow unittest // Bugzilla 11703
+// https://issues.dlang.org/show_bug.cgi?id=11703
+@safe @nogc pure nothrow unittest
 {
     alias I = Typedef!int;
     static assert(is(typeof(I.min) == I));
@@ -7645,7 +7745,7 @@ template TypedefType(T)
 
 @safe unittest
 {
-    // bug8655
+    // https://issues.dlang.org/show_bug.cgi?id=8655
     import std.typecons;
     import std.bitmanip;
     static import core.stdc.config;
@@ -7661,7 +7761,8 @@ template TypedefType(T)
     }
 }
 
-@safe unittest // Issue 12596
+// https://issues.dlang.org/show_bug.cgi?id=12596
+@safe unittest
 {
     import std.typecons;
     alias TD = Typedef!int;
@@ -7767,6 +7868,24 @@ template TypedefType(T)
             assert(t.to!string() == itd.to!string());
         }
     }}
+}
+
+@safe @nogc unittest // typedef'ed type with custom operators
+{
+    static struct MyInt
+    {
+        int value;
+        int opCmp(MyInt other)
+        {
+            if (value < other.value)
+                return -1;
+            return !(value == other.value);
+        }
+    }
+
+    auto m1 = Typedef!MyInt(MyInt(1));
+    auto m2 = Typedef!MyInt(MyInt(2));
+    assert(m1 < m2);
 }
 
 /**
@@ -7932,7 +8051,8 @@ if (alignment > 0 && !((alignment - 1) & alignment))
     return (n + badEnd) & ~badEnd;
 }
 
-@system unittest // Issue 6580 testcase
+// https://issues.dlang.org/show_bug.cgi?id=6580 testcase
+@system unittest
 {
     enum alignment = (void*).alignof;
 
@@ -7995,7 +8115,8 @@ if (alignment > 0 && !((alignment - 1) & alignment))
     }
 }
 
-@system unittest // Original Issue 6580 testcase
+// Original https://issues.dlang.org/show_bug.cgi?id=6580 testcase
+@system unittest
 {
     class C { int i; byte b; }
 
@@ -8048,7 +8169,8 @@ if (alignment > 0 && !((alignment - 1) & alignment))
     assert(A.dead, "asdasd");
 }
 
-@system unittest // Issue 8039 testcase
+// https://issues.dlang.org/show_bug.cgi?id=8039 testcase
+@system unittest
 {
     static int dels;
     static struct S { ~this(){ ++dels; } }
@@ -8073,7 +8195,7 @@ if (alignment > 0 && !((alignment - 1) & alignment))
 
 @system unittest
 {
-    // bug4500
+    // https://issues.dlang.org/show_bug.cgi?id=4500
     class A
     {
         this() { a = this; }
@@ -8846,7 +8968,8 @@ template ReplaceTypeUnless(alias pred, From, To, T...)
             alias ReplaceTypeUnless = U!(staticMap!(replaceTemplateArgs, V));
         }
         else static if (is(T[0] == struct))
-            // don't match with alias this struct below (Issue 15168)
+            // don't match with alias this struct below
+            // https://issues.dlang.org/show_bug.cgi?id=15168
             alias ReplaceTypeUnless = T[0];
         else static if (is(T[0] == U[], U))
             alias ReplaceTypeUnless = ReplaceTypeUnless!(pred, From, To, U)[];
@@ -9042,7 +9165,7 @@ private template replaceTypeInFunctionTypeUnless(alias pred, From, To, fun)
             string[3] function(string[] arr, string[2] ...) pure @trusted,
     );
 
-    // Bugzilla 15168
+    // https://issues.dlang.org/show_bug.cgi?id=15168
     static struct T1 { string s; alias s this; }
     static struct T2 { char[10] s; alias s this; }
     static struct T3 { string[string] s; alias s this; }
@@ -9053,7 +9176,8 @@ private template replaceTypeInFunctionTypeUnless(alias pred, From, To, fun)
     );
 }
 
-@safe unittest // Bugzilla 17116
+// https://issues.dlang.org/show_bug.cgi?id=17116
+@safe unittest
 {
     alias ConstDg = void delegate(float) const;
     alias B = void delegate(int) const;
@@ -9061,22 +9185,24 @@ private template replaceTypeInFunctionTypeUnless(alias pred, From, To, fun)
     static assert(is(B == A));
 }
 
-
-@safe unittest // Bugzilla 19696
+ // https://issues.dlang.org/show_bug.cgi?id=19696
+@safe unittest
 {
     static struct T(U) {}
     static struct S { T!int t; alias t this; }
     static assert(is(ReplaceType!(float, float, S) == S));
 }
 
-@safe unittest // Bugzilla 19697
+ // https://issues.dlang.org/show_bug.cgi?id=19697
+@safe unittest
 {
     class D(T) {}
     class C : D!C {}
     static assert(is(ReplaceType!(float, float, C)));
 }
 
-@safe unittest // Bugzilla 16132
+// https://issues.dlang.org/show_bug.cgi?id=16132
+@safe unittest
 {
     interface I(T) {}
     class C : I!int {}

@@ -226,8 +226,9 @@ module std.experimental.allocator;
 public import std.experimental.allocator.common,
     std.experimental.allocator.typed;
 
-// Fix issue 17806: this should always be the first unittest in this module
-// in order to ensure that we use the `processAllocator` setter before the getter
+// Fix https://issues.dlang.org/show_bug.cgi?id=17806
+// this should always be the first unittest in this module in order to ensure
+// that we use the `processAllocator` setter before the getter
 @system unittest
 {
     import std.experimental.allocator.mallocator : Mallocator;
@@ -1246,7 +1247,9 @@ auto make(T, Allocator, A...)(auto ref Allocator alloc, auto ref A args)
     assert(outer.x == inner.getX);
 }
 
-@system unittest // bugzilla 15639 & 15772
+// https://issues.dlang.org/show_bug.cgi?id=15639
+// https://issues.dlang.org/show_bug.cgi?id=15772
+@system unittest
 {
     abstract class Foo {}
     class Bar: Foo {}
@@ -1410,7 +1413,8 @@ nothrow @safe @nogc unittest
         "Don't allow zero-ctor-args `make` for structs with `@disable this();`");
 }
 
-@safe unittest // issue 18937
+// https://issues.dlang.org/show_bug.cgi?id=18937
+@safe unittest
 {
     static struct S
     {
@@ -1489,7 +1493,7 @@ private T[] uninitializedFillDefault(T)(T[] array) nothrow
             memset(array.ptr, 0, T.sizeof * array.length);
         return array;
     }
-    else static if (is(Unqual!T == char) || is(Unqual!T == wchar))
+    else static if (is(immutable T == immutable char) || is(immutable T == immutable wchar))
     {
         import core.stdc.string : memset;
         if (array !is null)
@@ -2076,14 +2080,14 @@ if (isInputRange!R && !isInfinite!R)
     assert(arr2.map!`a.val`.equal(iota(32, 204, 2)));
 }
 
-version (unittest)
+version (StdUnittest)
 {
-    private struct ForcedInputRange
+    private struct ForcedInputRange(T)
     {
-        int[]* array;
+        T[]* array;
         pure nothrow @safe @nogc:
         bool empty() { return !array || (*array).empty; }
-        ref int front() { return (*array)[0]; }
+        ref T front() { return (*array)[0]; }
         void popFront() { *array = (*array)[1 .. $]; }
     }
 }
@@ -2096,7 +2100,7 @@ version (unittest)
 
     void test(A)(auto ref A alloc)
     {
-        ForcedInputRange r;
+        ForcedInputRange!int r;
         long[] a = alloc.makeArray!long(r);
         assert(a.length == 0 && a.ptr is null);
         auto arr2 = arr;
@@ -2217,13 +2221,13 @@ if (isInputRange!R)
             toFill.uninitializedFillDefault;
         }
 
-        for (; !range.empty; range.popFront, toFill.popFront)
+        for (; !range.empty; range.popFront, toFill = toFill[1 .. $])
         {
-            assert(!toFill.empty);
+            assert(toFill.length > 0);
             import std.conv : emplace;
-            emplace!T(&toFill.front, range.front);
+            emplace!T(&toFill[0], range.front);
         }
-        assert(toFill.empty);
+        assert(toFill.length == 0);
     }
     else
     {
@@ -2263,12 +2267,42 @@ if (isInputRange!R)
 @system unittest
 {
     auto arr = theAllocator.makeArray!int([1, 2, 3]);
-    ForcedInputRange r;
+    ForcedInputRange!int r;
     int[] b = [ 1, 2, 3, 4 ];
     auto temp = b;
     r.array = &temp;
     assert(theAllocator.expandArray(arr, r));
     assert(arr == [1, 2, 3, 1, 2, 3, 4]);
+}
+
+// Regression test for https://issues.dlang.org/show_bug.cgi?id=20929
+@system unittest
+{
+    static void test(Char, Allocator)(auto ref Allocator alloc)
+    {
+        auto arr = alloc.makeArray!Char(1, Char('f'));
+
+        import std.utf : byUTF;
+        auto forwardRange = "oo".byUTF!Char();
+        static assert(isForwardRange!(typeof(forwardRange)));
+        // Test the forward-range code-path.
+        assert(alloc.expandArray(arr, forwardRange));
+
+        assert(arr == "foo");
+
+        immutable(Char)[] temp = "bar";
+        auto inputRange = ForcedInputRange!(immutable(Char))(&temp);
+        // Test the input-range code-path.
+        assert(alloc.expandArray(arr, inputRange));
+
+        assert(arr == "foobar");
+    }
+
+    import std.experimental.allocator.gc_allocator : GCAllocator;
+    test!char(GCAllocator.instance);
+    test!wchar(GCAllocator.instance);
+    test!char(theAllocator);
+    test!wchar(theAllocator);
 }
 
 /**
@@ -2455,7 +2489,8 @@ void dispose(A, T)(auto ref A alloc, auto ref T[] array)
     theAllocator.dispose(arr);
 }
 
-@system unittest //bugzilla 16512
+// https://issues.dlang.org/show_bug.cgi?id=16512
+@system unittest
 {
     import std.experimental.allocator.mallocator : Mallocator;
 
@@ -2476,7 +2511,8 @@ void dispose(A, T)(auto ref A alloc, auto ref T[] array)
     assert(ua is null);
 }
 
-@system unittest //bugzilla 15721
+// https://issues.dlang.org/show_bug.cgi?id=15721
+@system unittest
 {
     import std.experimental.allocator.mallocator : Mallocator;
 

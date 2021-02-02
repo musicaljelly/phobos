@@ -4,6 +4,7 @@
 Facilities for random number generation.
 
 $(SCRIPT inhibitQuickIndex = 1;)
+$(DIVC quickindex,
 $(BOOKTABLE,
 $(TR $(TH Category) $(TH Functions))
 $(TR $(TD Uniform sampling) $(TD
@@ -52,7 +53,7 @@ $(TR $(TD Traits) $(TD
     $(LREF isSeedable)
     $(LREF isUniformRNG)
 ))
-)
+))
 
 $(RED Disclaimer:) The random number generators and API provided in this
 module are not designed to be cryptographically secure, and are therefore
@@ -106,6 +107,18 @@ module std.random;
 import std.range.primitives;
 import std.traits;
 
+version (OSX)
+    version = Darwin;
+else version (iOS)
+    version = Darwin;
+else version (TVOS)
+    version = Darwin;
+else version (WatchOS)
+    version = Darwin;
+
+version (D_InlineAsm_X86) version = InlineAsm_X86_Any;
+version (D_InlineAsm_X86_64) version = InlineAsm_X86_Any;
+
 ///
 @safe unittest
 {
@@ -153,15 +166,15 @@ import std.traits;
     assert(10.iota.randomSample(3, rnd2).equal([7, 8, 9]));
 
     // Cover all elements in an array in random order
-    version (X86_64) // Issue 15147
+    version (X86_64) // https://issues.dlang.org/show_bug.cgi?id=15147
     assert(10.iota.randomCover(rnd2).equal([7, 4, 2, 0, 1, 6, 8, 3, 9, 5]));
 
     // Shuffle an array
-    version (X86_64) // Issue 15147
+    version (X86_64) // https://issues.dlang.org/show_bug.cgi?id=15147
     assert([0, 1, 2, 4, 5].randomShuffle(rnd2).equal([2, 0, 4, 5, 1]));
 }
 
-version (unittest)
+version (StdUnittest)
 {
     static import std.meta;
     package alias Xorshift64_64 = XorshiftEngine!(ulong, 64, -12, 25, -27);
@@ -273,7 +286,8 @@ template isUniformRNG(Rng)
 
 @safe unittest
 {
-    // Issue 19837: two-argument predicate should not require @property on `front`.
+    // two-argument predicate should not require @property on `front`
+    // https://issues.dlang.org/show_bug.cgi?id=19837
     struct Rng
     {
         float front() {return 0;}
@@ -699,7 +713,8 @@ alias MinstdRand = LinearCongruentialEngine!(uint, 48_271, 0, 2_147_483_647);
     {{
         auto rnd1 = Type(123_456_789);
         rnd1.popFront();
-        auto rnd2 = ((const ref Type a) => a.save())(rnd1); // Issue 15853.
+        // https://issues.dlang.org/show_bug.cgi?id=15853
+        auto rnd2 = ((const ref Type a) => a.save())(rnd1);
         assert(rnd1 == rnd2);
         // Enable next test when RNGs are reference types
         version (none) { assert(rnd1 !is rnd2); }
@@ -730,7 +745,7 @@ if (isUnsigned!UIntType)
     static assert(0 <= r && 0 <= u && 0 <= s && 0 <= t && 0 <= l);
     static assert(r <= w && u <= w && s <= w && t <= w && l <= w);
     static assert(0 <= a && 0 <= b && 0 <= c);
-    static assert(n <= sizediff_t.max);
+    static assert(n <= ptrdiff_t.max);
 
     ///Mark this as a Rng
     enum bool isUniformRandom = true;
@@ -887,7 +902,7 @@ Parameters for the generator.
    `Exception` if the InputRange didn't provide enough elements to seed the generator.
    The number of elements required is the 'n' template parameter of the MersenneTwisterEngine struct.
  */
-    void seed(T)(T range) if (isInputRange!T && is(Unqual!(ElementType!T) == UIntType))
+    void seed(T)(T range) if (isInputRange!T && is(immutable ElementType!T == immutable UIntType))
     {
         this.seedImpl(range, this.state);
     }
@@ -897,12 +912,12 @@ Parameters for the generator.
        which can be used with an arbitrary `State` instance
     */
     private static void seedImpl(T)(T range, ref State mtState)
-        if (isInputRange!T && is(Unqual!(ElementType!T) == UIntType))
+        if (isInputRange!T && is(immutable ElementType!T == immutable UIntType))
     {
         size_t j;
         for (j = 0; j < n && !range.empty; ++j, range.popFront())
         {
-            sizediff_t idx = n - j - 1;
+            ptrdiff_t idx = n - j - 1;
             mtState.data[idx] = range.front;
         }
 
@@ -914,7 +929,7 @@ Parameters for the generator.
 
             UnsignedStringBuf buf = void;
             string s = "MersenneTwisterEngine.seed: Input range didn't provide enough elements: Need ";
-            s ~= unsignedToTempString(n, buf, 10) ~ " elements.";
+            s ~= unsignedToTempString(n, buf) ~ " elements.";
             throw new Exception(s);
         }
 
@@ -951,12 +966,12 @@ Parameters for the generator.
            them separately in sequence, the variables
            are kept 'hot' in CPU registers, allowing
            for significantly faster performance. */
-        sizediff_t index = mtState.index;
-        sizediff_t next = index - 1;
+        ptrdiff_t index = mtState.index;
+        ptrdiff_t next = index - 1;
         if (next < 0)
             next = n - 1;
         auto z = mtState.z;
-        sizediff_t conj = index - m;
+        ptrdiff_t conj = index - m;
         if (conj < 0)
             conj = index - m + n;
 
@@ -1148,7 +1163,8 @@ alias Mt19937_64 = MersenneTwisterEngine!(ulong, 64, 312, 156, 31,
     {{
         auto gen1 = Type(123_456_789);
         gen1.popFront();
-        auto gen2 = ((const ref Type a) => a.save())(gen1); // Issue 15853.
+        // https://issues.dlang.org/show_bug.cgi?id=15853
+        auto gen2 = ((const ref Type a) => a.save())(gen1);
         assert(gen1 == gen2);  // Danger, Will Robinson -- no opEquals for MT
         // Enable next test when RNGs are reference types
         version (none) { assert(gen1 !is gen2); }
@@ -1157,7 +1173,8 @@ alias Mt19937_64 = MersenneTwisterEngine!(ulong, 64, 312, 156, 31,
     }}
 }
 
-@safe @nogc pure nothrow unittest //11690
+// https://issues.dlang.org/show_bug.cgi?id=11690
+@safe @nogc pure nothrow unittest
 {
     alias MT(UIntType, uint w) = MersenneTwisterEngine!(UIntType, w, 624, 397, 31,
                                                         0x9908b0df, 11, 0xffffffff, 7,
@@ -1586,7 +1603,8 @@ alias Xorshift    = Xorshift128;                            /// ditto
     {
         auto rnd1 = Type(123_456_789);
         rnd1.popFront();
-        auto rnd2 = ((const ref Type a) => a.save())(rnd1); // Issue 15853.
+        // https://issues.dlang.org/show_bug.cgi?id=15853
+        auto rnd2 = ((const ref Type a) => a.save())(rnd1);
         assert(rnd1 == rnd2);
         // Enable next test when RNGs are reference types
         version (none) { assert(rnd1 !is rnd2); }
@@ -1612,7 +1630,7 @@ alias Xorshift    = Xorshift128;                            /// ditto
 
 version (CRuntime_Bionic)
     version = SecureARC4Random; // ChaCha20
-version (OSX)
+version (Darwin)
     version = SecureARC4Random; // AES
 version (OpenBSD)
     version = SecureARC4Random; // ChaCha20
@@ -1657,10 +1675,10 @@ else
 {
     private ulong bootstrapSeed() @nogc nothrow
     {
-        // Issue 19580 - previously used `ulong result = void` to start with
-        // an arbitary value but using an uninitialized variable's value is
-        // undefined behavior and enabled unwanted optimizations on non-DMD
-        // compilers.
+        // https://issues.dlang.org/show_bug.cgi?id=19580
+        // previously used `ulong result = void` to start with an arbitary value
+        // but using an uninitialized variable's value is undefined behavior
+        // and enabled unwanted optimizations on non-DMD compilers.
         ulong result;
         enum ulong m = 0xc6a4_a793_5bd1_e995UL; // MurmurHash2_64A constant.
         void updateResult(ulong x)
@@ -1677,6 +1695,46 @@ else
         updateResult(cast(ulong) MonoTime.currTime.ticks);
         result = (result ^ (result >>> 47)) * m;
         return result ^ (result >>> 47);
+    }
+
+    // If we don't have arc4random and we don't have RDRAND fall back to this.
+    private ulong fallbackSeed() @nogc nothrow
+    {
+        // Bit avalanche function from MurmurHash3.
+        static ulong fmix64(ulong k) @nogc nothrow pure @safe
+        {
+            k = (k ^ (k >>> 33)) * 0xff51afd7ed558ccd;
+            k = (k ^ (k >>> 33)) * 0xc4ceb9fe1a85ec53;
+            return k ^ (k >>> 33);
+        }
+        // Using SplitMix algorithm with constant gamma.
+        // Chosen gamma is the odd number closest to 2^^64
+        // divided by the silver ratio (1.0L + sqrt(2.0L)).
+        enum gamma = 0x6a09e667f3bcc909UL;
+        import core.atomic : has64BitCAS;
+        static if (has64BitCAS)
+        {
+            import core.atomic : MemoryOrder, atomicLoad, atomicOp, atomicStore, cas;
+            shared static ulong seed;
+            shared static bool initialized;
+            if (0 == atomicLoad!(MemoryOrder.raw)(initialized))
+            {
+                cas(&seed, 0UL, fmix64(bootstrapSeed()));
+                atomicStore!(MemoryOrder.rel)(initialized, true);
+            }
+            return fmix64(atomicOp!"+="(seed, gamma));
+        }
+        else
+        {
+            static ulong seed;
+            static bool initialized;
+            if (!initialized)
+            {
+                seed = fmix64(bootstrapSeed());
+                initialized = true;
+            }
+            return fmix64(seed += gamma);
+        }
     }
 }
 
@@ -1702,7 +1760,28 @@ how excellent the source of entropy is.
     }
     else
     {
-        return cast(uint) unpredictableSeed!ulong;
+        version (InlineAsm_X86_Any)
+        {
+            import core.cpuid : hasRdrand;
+            if (hasRdrand)
+            {
+                uint result;
+                asm @nogc nothrow
+                {
+                    db 0x0f, 0xc7, 0xf0; // rdrand EAX
+                    jnc LnotUsingRdrand;
+                    // Some AMD CPUs shipped with bugs where RDRAND could fail
+                    // but still set the carry flag to 1. In those cases the
+                    // output will be -1.
+                    cmp EAX, 0xffff_ffff;
+                    je LnotUsingRdrand;
+                    mov result, EAX;
+                }
+                return result;
+            }
+        LnotUsingRdrand:
+        }
+        return cast(uint) fallbackSeed();
     }
 }
 
@@ -1731,48 +1810,64 @@ if (isUnsigned!UIntType)
                     return result;
                 }
             }
-            else static if (!is(UIntType == ulong))
-            {
-                // The work occurs in the ulong implementation.
-                return cast(UIntType) unpredictableSeed!ulong;
-            }
             else
             {
-                // Bit avalanche function from MurmurHash3.
-                static ulong fmix64(ulong k) @nogc nothrow pure @safe
+                version (InlineAsm_X86_Any)
                 {
-                    k = (k ^ (k >>> 33)) * 0xff51afd7ed558ccd;
-                    k = (k ^ (k >>> 33)) * 0xc4ceb9fe1a85ec53;
-                    return k ^ (k >>> 33);
-                }
-                // Using SplitMix algorithm with constant gamma.
-                // Chosen gamma is the odd number closest to 2^^64
-                // divided by the silver ratio (1.0L + sqrt(2.0L)).
-                enum gamma = 0x6a09e667f3bcc909UL;
-                import core.atomic : has64BitCAS;
-                static if (has64BitCAS)
-                {
-                    import core.atomic : MemoryOrder, atomicLoad, atomicOp, atomicStore, cas;
-                    shared static ulong seed;
-                    shared static bool initialized;
-                    if (0 == atomicLoad!(MemoryOrder.raw)(initialized))
+                    import core.cpuid : hasRdrand;
+                    if (hasRdrand)
                     {
-                        cas(&seed, 0UL, fmix64(bootstrapSeed()));
-                        atomicStore!(MemoryOrder.rel)(initialized, true);
+                        static if (UIntType.sizeof <= uint.sizeof)
+                        {
+                            uint result;
+                            asm @nogc nothrow
+                            {
+                                db 0x0f, 0xc7, 0xf0; // rdrand EAX
+                                jnc LnotUsingRdrand;
+                                // Some AMD CPUs shipped with bugs where RDRAND could fail
+                                // but still set the carry flag to 1. In those cases the
+                                // output will be -1.
+                                cmp EAX, 0xffff_ffff;
+                                je LnotUsingRdrand;
+                                mov result, EAX;
+                            }
+                            return cast(UIntType) result;
+                        }
+                        else version (D_InlineAsm_X86_64)
+                        {
+                            ulong result;
+                            asm @nogc nothrow
+                            {
+                                db 0x48, 0x0f, 0xc7, 0xf0; // rdrand RAX
+                                jnc LnotUsingRdrand;
+                                // Some AMD CPUs shipped with bugs where RDRAND could fail
+                                // but still set the carry flag to 1. In those cases the
+                                // output will be -1.
+                                cmp RAX, 0xffff_ffff_ffff_ffff;
+                                je LnotUsingRdrand;
+                                mov result, RAX;
+                            }
+                            return result;
+                        }
+                        else
+                        {
+                            uint resultLow, resultHigh;
+                            asm @nogc nothrow
+                            {
+                                db 0x0f, 0xc7, 0xf0; // rdrand EAX
+                                jnc LnotUsingRdrand;
+                                mov resultLow, EAX;
+                                db 0x0f, 0xc7, 0xf0; // rdrand EAX
+                                jnc LnotUsingRdrand;
+                                mov resultHigh, EAX;
+                            }
+                            if (resultLow != uint.max || resultHigh != uint.max) // Protect against AMD RDRAND bug.
+                                return ((cast(ulong) resultHigh) << 32) ^ resultLow;
+                        }
                     }
-                    return fmix64(atomicOp!"+="(seed, gamma));
+                LnotUsingRdrand:
                 }
-                else
-                {
-                    static ulong seed;
-                    static bool initialized;
-                    if (!initialized)
-                    {
-                        seed = fmix64(bootstrapSeed());
-                        initialized = true;
-                    }
-                    return fmix64(seed += gamma);
-                }
+                return cast(UIntType) fallbackSeed();
             }
         }
 }
@@ -2332,9 +2427,9 @@ if (!is(T == enum) && (isIntegral!T || isSomeChar!T) && isUniformRNG!UniformRand
     /* dchar does not use its full bit range, so we must
      * revert to the uniform with specified bounds
      */
-    static if (is(T == dchar))
+    static if (is(immutable T == immutable dchar))
     {
-        return uniform!"[]"(T.min, T.max);
+        return uniform!"[]"(T.min, T.max, urng);
     }
     else
     {
@@ -2370,8 +2465,18 @@ if (!is(T == enum) && (isIntegral!T || isSomeChar!T))
     assert(rnd.uniform!ulong == 4838462006927449017);
 
     enum Fruit { apple, mango, pear }
-    version (X86_64) // Issue 15147
+    version (X86_64) // https://issues.dlang.org/show_bug.cgi?id=15147
     assert(rnd.uniform!Fruit == Fruit.mango);
+}
+
+@safe unittest
+{
+    // https://issues.dlang.org/show_bug.cgi?id=21383
+    auto rng1 = Xorshift32(123456789);
+    auto rng2 = rng1.save;
+    assert(rng1.uniform!dchar == rng2.uniform!dchar);
+    // https://issues.dlang.org/show_bug.cgi?id=21384
+    assert(rng1.uniform!(const shared dchar) <= dchar.max);
 }
 
 @safe unittest
@@ -2509,8 +2614,16 @@ do
 
     auto rnd = MinstdRand0(42);
 
-    assert(rnd.uniform01.feqrel(0.000328707) > 20);
-    assert(rnd.uniform01!float.feqrel(0.524587) > 20);
+    // Generate random numbers in the range in the range [0, 1)
+    auto u1 = uniform01(rnd);
+    assert(u1 >= 0 && u1 < 1);
+
+    auto u2 = rnd.uniform01!float;
+    assert(u2 >= 0 && u2 < 1);
+
+    // Confirm that the random values with the initial seed 42 are 0.000328707 and 0.524587
+    assert(u1.feqrel(0.000328707) > 20);
+    assert(u2.feqrel(0.524587) > 20);
 }
 
 @safe @nogc unittest
@@ -2617,7 +2730,7 @@ auto ref choice(Range)(auto ref Range range)
     auto rnd = MinstdRand0(42);
 
     auto elem  = [1, 2, 3, 4, 5].choice(rnd);
-    version (X86_64) // Issue 15147
+    version (X86_64) // https://issues.dlang.org/show_bug.cgi?id=15147
     assert(elem == 3);
 }
 
@@ -2699,7 +2812,7 @@ if (isRandomAccessRange!Range)
     auto rnd = MinstdRand0(42);
 
     auto arr = [1, 2, 3, 4, 5].randomShuffle(rnd);
-    version (X86_64) // Issue 15147
+    version (X86_64) // https://issues.dlang.org/show_bug.cgi?id=15147
     assert(arr == [3, 5, 2, 4, 1]);
 }
 
@@ -2726,13 +2839,15 @@ if (isRandomAccessRange!Range)
     auto gen1 = Xorshift(123_456_789);
     auto gen2 = gen1.save();
     sa[] = sb[];
-    // Issue 19156 - @nogc std.random.randomShuffle.
+    // @nogc std.random.randomShuffle.
+    // https://issues.dlang.org/show_bug.cgi?id=19156
     () @nogc nothrow pure { randomShuffle(sa[], gen1); }();
     partialShuffle(sb[], sb.length, gen2);
     assert(sa[] == sb[]);
 }
 
-@safe unittest // bugzilla 18501
+// https://issues.dlang.org/show_bug.cgi?id=18501
+@safe unittest
 {
     import std.algorithm.comparison : among;
     auto r = randomShuffle([0,1]);
@@ -2787,15 +2902,15 @@ if (isRandomAccessRange!Range)
     auto arr = [1, 2, 3, 4, 5, 6];
     arr = arr.dup.partialShuffle(1, rnd);
 
-    version (X86_64) // Issue 15147
+    version (X86_64) // https://issues.dlang.org/show_bug.cgi?id=15147
     assert(arr == [2, 1, 3, 4, 5, 6]); // 1<->2
 
     arr = arr.dup.partialShuffle(2, rnd);
-    version (X86_64) // Issue 15147
+    version (X86_64) // https://issues.dlang.org/show_bug.cgi?id=15147
     assert(arr == [1, 4, 3, 2, 5, 6]); // 1<->2, 2<->4
 
     arr = arr.dup.partialShuffle(3, rnd);
-    version (X86_64) // Issue 15147
+    version (X86_64) // https://issues.dlang.org/show_bug.cgi?id=15147
     assert(arr == [5, 4, 6, 2, 1, 3]); // 1<->5, 2<->4, 3<->6
 }
 
@@ -2950,9 +3065,10 @@ do
 - bigger length means non-GC heap allocation(s) and dealloc. +/
 private struct RandomCoverChoices
 {
-    private void* buffer;
+    private size_t* buffer;
     private immutable size_t _length;
     private immutable bool hasPackedBits;
+    private enum BITS_PER_WORD = typeof(buffer[0]).sizeof * 8;
 
     void opAssign(T)(T) @disable;
 
@@ -2963,8 +3079,9 @@ private struct RandomCoverChoices
 
         if (!hasPackedBits && buffer !is null)
         {
-            void* nbuffer = enforceMalloc(_length);
-            buffer = memcpy(nbuffer, buffer, _length);
+            const nBytesToAlloc = size_t.sizeof * (_length / BITS_PER_WORD + int(_length % BITS_PER_WORD != 0));
+            void* nbuffer = enforceMalloc(nBytesToAlloc);
+            buffer = cast(size_t*) memcpy(nbuffer, buffer, nBytesToAlloc);
         }
     }
 
@@ -2976,7 +3093,8 @@ private struct RandomCoverChoices
         hasPackedBits = _length <= size_t.sizeof * 8;
         if (!hasPackedBits)
         {
-            buffer = enforceCalloc(numChoices, 1);
+            const nWordsToAlloc = _length / BITS_PER_WORD + int(_length % BITS_PER_WORD != 0);
+            buffer = cast(size_t*) enforceCalloc(nWordsToAlloc, BITS_PER_WORD / 8);
         }
     }
 
@@ -2993,8 +3111,9 @@ private struct RandomCoverChoices
     bool opIndex(size_t index) const pure nothrow @nogc @trusted
     {
         assert(index < _length);
+        import core.bitop : bt;
         if (!hasPackedBits)
-            return *((cast(bool*) buffer) + index);
+            return cast(bool) bt(buffer, index);
         else
             return ((cast(size_t) buffer) >> index) & size_t(1);
     }
@@ -3004,7 +3123,11 @@ private struct RandomCoverChoices
         assert(index < _length);
         if (!hasPackedBits)
         {
-            *((cast(bool*) buffer) + index) = value;
+            import core.bitop : btr, bts;
+            if (value)
+                bts(buffer, index);
+            else
+                btr(buffer, index);
         }
         else
         {
@@ -3193,7 +3316,7 @@ if (isRandomAccessRange!Range)
     import std.range : iota;
     auto rnd = MinstdRand0(42);
 
-    version (X86_64) // Issue 15147
+    version (X86_64) // https://issues.dlang.org/show_bug.cgi?id=15147
     assert(10.iota.randomCover(rnd).equal([7, 4, 2, 0, 1, 6, 8, 3, 9, 5]));
 }
 
@@ -3207,7 +3330,8 @@ if (isRandomAccessRange!Range)
 
 @nogc nothrow pure @safe unittest
 {
-    // Issue 14001 - Optionally @nogc std.random.randomCover
+    // Optionally @nogc std.random.randomCover
+    // https://issues.dlang.org/show_bug.cgi?id=14001
     auto rng = Xorshift(123_456_789);
     int[5] sa = [1, 2, 3, 4, 5];
     auto r = randomCover(sa[], rng);
@@ -3259,13 +3383,13 @@ if (isRandomAccessRange!Range)
 
 @safe unittest
 {
-    // Bugzilla 12589
+    // https://issues.dlang.org/show_bug.cgi?id=12589
     int[] r = [];
     auto rc = randomCover(r);
     assert(rc.length == 0);
     assert(rc.empty);
 
-    // Bugzilla 16724
+    // https://issues.dlang.org/show_bug.cgi?id=16724
     import std.range : iota;
     auto range = iota(10);
     auto randy = range.randomCover;
@@ -3787,7 +3911,8 @@ if (isInputRange!Range && hasLength!Range && isUniformRNG!UniformRNG)
     const(int)[] a = [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ];
 
     foreach (UniformRNG; PseudoRngTypes)
-    (){ // avoid workaround optimizations for large functions @@@BUG@@@ 2396
+    (){ // avoid workaround optimizations for large functions
+        // https://issues.dlang.org/show_bug.cgi?id=2396
         auto rng = UniformRNG(1234);
         /* First test the most general case: randomSample of input range, with and
          * without a specified random number generator.
@@ -3971,7 +4096,7 @@ if (isInputRange!Range && hasLength!Range && isUniformRNG!UniformRNG)
             }
 
             /* Check that it also works if .index is called before .front.
-             * See: http://d.puremagic.com/issues/show_bug.cgi?id=10322
+             * See: https://issues.dlang.org/show_bug.cgi?id=10322
              */
             auto sample3 = randomSample(TestInputRange(), 654, 654_321);
             for (; !sample3.empty; sample3.popFront())
@@ -3995,7 +4120,7 @@ if (isInputRange!Range && hasLength!Range && isUniformRNG!UniformRNG)
          */
         {
             size_t count0, count1, count99;
-            foreach (_; 0 .. 100_000)
+            foreach (_; 0 .. 50_000)
             {
                 auto sample = randomSample(iota(100), 5, &rng);
                 sample.popFront();
@@ -4030,9 +4155,9 @@ if (isInputRange!Range && hasLength!Range && isUniformRNG!UniformRNG)
              * the variance can be quite high.
              */
             assert(count0 == 0);
-            assert(count1 < 300, text("1: ", count1, " > 300."));
-            assert(4_700 < count99, text("99: ", count99, " < 4700."));
-            assert(count99 < 5_300, text("99: ", count99, " > 5300."));
+            assert(count1 < 150, text("1: ", count1, " > 150."));
+            assert(2_200 < count99, text("99: ", count99, " < 2200."));
+            assert(count99 < 2_800, text("99: ", count99, " > 2800."));
         }
 
         /* Odd corner-cases: RandomSample has 2 constructors that are not called
@@ -4079,11 +4204,12 @@ if (isInputRange!Range && hasLength!Range && isUniformRNG!UniformRNG)
         static if (isForwardRange!UniformRNG)
         {
             auto sample1 = randomSample(a, 5, rng);
-            auto sample2 = ((const ref typeof(sample1) a) => a.save)(sample1); // Issue 15853.
+            // https://issues.dlang.org/show_bug.cgi?id=15853
+            auto sample2 = ((const ref typeof(sample1) a) => a.save)(sample1);
             assert(sample1.array() == sample2.array());
         }
 
-        // Bugzilla 8314
+        // https://issues.dlang.org/show_bug.cgi?id=8314
         {
             auto sample(RandomGen)(uint seed) { return randomSample(a, 1, RandomGen(seed)).front; }
 

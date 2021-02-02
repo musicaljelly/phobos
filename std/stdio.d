@@ -66,6 +66,21 @@ version (OSX)
     version = GENERIC_IO;
     version = HAS_GETDELIM;
 }
+else version (iOS)
+{
+    version = GENERIC_IO;
+    version = HAS_GETDELIM;
+}
+else version (TVOS)
+{
+    version = GENERIC_IO;
+    version = HAS_GETDELIM;
+}
+else version (WatchOS)
+{
+    version = GENERIC_IO;
+    version = HAS_GETDELIM;
+}
 else version (FreeBSD)
 {
     version = GENERIC_IO;
@@ -92,12 +107,11 @@ version (Windows)
 {
     private alias FSChar = wchar;
 }
-else version (Posix)
+else
 {
     private alias FSChar = char;
 }
-else
-    static assert(0);
+
 
 version (Windows)
 {
@@ -304,14 +318,6 @@ public:
     }
 }
 
-// @@@DEPRECATED_2019-01@@@
-deprecated("Use .byRecord")
-struct ByRecord(Fields...)
-{
-    ByRecordImpl!Fields payload;
-    alias payload this;
-}
-
 template byRecord(Fields...)
 {
     auto byRecord(File f, string format)
@@ -335,6 +341,8 @@ automatically closed.
 Example:
 ----
 // test.d
+import std.stdio;
+
 void main(string[] args)
 {
     auto f = File("test.txt", "w"); // open for writing
@@ -482,7 +490,8 @@ file.
         return this;
     }
 
-    @safe unittest // bugzilla 20129
+     // https://issues.dlang.org/show_bug.cgi?id=20129
+    @safe unittest
     {
         File[int] aa;
         aa.require(0, File.init);
@@ -501,6 +510,21 @@ Throws: `ErrnoException` in case of error.
         resetFile(name, stdioOpenmode, false);
     }
 
+    // https://issues.dlang.org/show_bug.cgi?id=20585
+    @system unittest
+    {
+        File f;
+        try
+            f.open("doesn't exist");
+        catch (Exception _e)
+        {
+        }
+
+        assert(!f.isOpen);
+
+        f.close();  // to check not crash here
+    }
+
     private void resetFile(string name, scope const(char)[] stdioOpenmode, bool isPopened) @trusted
     {
         import core.stdc.stdlib : malloc;
@@ -513,7 +537,6 @@ Throws: `ErrnoException` in case of error.
             detach();
         }
 
-        _p = cast(Impl*) enforce(malloc(Impl.sizeof), "Out of memory");
         FILE* handle;
         version (Posix)
         {
@@ -536,6 +559,7 @@ Throws: `ErrnoException` in case of error.
                          text("Cannot open file `", name, "' in mode `",
                               stdioOpenmode, "'"));
         }
+        _p = cast(Impl*) enforce(malloc(Impl.sizeof), "Out of memory");
         initImpl(handle, name, 1, isPopened);
         version (MICROSOFT_STDIO)
         {
@@ -681,11 +705,17 @@ Throws: `ErrnoException` in case of error.
     }
 
 /**
-First calls `detach` (throwing on failure), and then attempts to
-associate the given file descriptor with the `File`. The mode must
-be compatible with the mode of the file descriptor.
+First calls `detach` (throwing on failure), then attempts to
+associate the given file descriptor with the `File`, and sets the file's name to `null`.
+
+The mode must be compatible with the mode of the file descriptor.
 
 Throws: `ErrnoException` in case of error.
+Params:
+    fd = File descriptor to associate with this `File`.
+    stdioOpenmode = Mode to associate with this File. The mode has the same semantics
+        semantics as in the C standard library
+        $(HTTP cplusplus.com/reference/cstdio/fopen/, fdopen) function, and must be compatible with `fd`.
  */
     void fdopen(int fd, scope const(char)[] stdioOpenmode = "rb") @safe
     {
@@ -797,9 +827,15 @@ Throws: `Exception` if the file is not opened.
         return .feof(cast(FILE*) _p.handle) != 0;
     }
 
-/** Returns the name of the last opened file, if any.
-If a `File` was created with $(LREF tmpfile) and $(LREF wrapFile)
-it has no name.*/
+/**
+ Returns the name last used to initialize this `File`, if any.
+
+ Some functions that create or initialize the `File` set the name field to `null`.
+ Examples include $(LREF tmpfile), $(LREF wrapFile), and $(LREF fdopen). See the
+ documentation of those functions for details.
+
+ Returns: The name last used to initialize this this file, or `null` otherwise.
+ */
     @property string name() const @safe pure nothrow
     {
         return _name;
@@ -817,7 +853,7 @@ the file handle.
 
     @safe unittest
     {
-        // Issue 12349
+        // https://issues.dlang.org/show_bug.cgi?id=12349
         static import std.file;
         auto deleteme = testFilename();
         auto f = File(deleteme, "w");
@@ -924,7 +960,7 @@ Throws: `Exception` if the file is not opened or if the call to `fflush` fails.
 
     @safe unittest
     {
-        // Issue 12349
+        // https://issues.dlang.org/show_bug.cgi?id=12349
         import std.exception : assertThrown;
         static import std.file;
 
@@ -996,7 +1032,7 @@ Throws: `Exception` if `buffer` is empty.
             {
                 import core.atomic : atomicOp;
 
-                // @@@BUG@@@ 4243
+                // https://issues.dlang.org/show_bug.cgi?id=4243
                 immutable info = __fhnd_info[fd];
                 atomicOp!"&="(__fhnd_info[fd], ~FHND_TEXT);
                 scope(exit) __fhnd_info[fd] = info;
@@ -1044,21 +1080,37 @@ Throws: `ErrnoException` if the file is not opened or if the call to `fwrite` fa
 
         version (Windows)
         {
-            flush(); // before changing translation mode
             immutable fd = ._fileno(_p.handle);
-            immutable mode = ._setmode(fd, _O_BINARY);
-            scope(exit) ._setmode(fd, mode);
+            immutable oldMode = ._setmode(fd, _O_BINARY);
+
+            if (oldMode != _O_BINARY)
+            {
+                // need to flush the data that was written with the original mode
+                ._setmode(fd, oldMode);
+                flush(); // before changing translation mode ._setmode(fd, _O_BINARY);
+                .setmode(fd, _O_BINARY);
+            }
+
             version (DIGITAL_MARS_STDIO)
             {
                 import core.atomic : atomicOp;
 
-                // @@@BUG@@@ 4243
+                // https://issues.dlang.org/show_bug.cgi?id=4243
                 immutable info = __fhnd_info[fd];
                 atomicOp!"&="(__fhnd_info[fd], ~FHND_TEXT);
-                scope(exit) __fhnd_info[fd] = info;
+                scope (exit) __fhnd_info[fd] = info;
             }
-            scope(exit) flush(); // before restoring translation mode
+
+            scope (exit)
+            {
+                if (oldMode != _O_BINARY)
+                {
+                    flush();
+                    ._setmode(fd, oldMode);
+                }
+            }
         }
+
         auto result = trustedFwrite(_p.handle, buffer);
         if (result == result.max) result = 0;
         errnoEnforce(result == buffer.length,
@@ -1103,6 +1155,14 @@ Throws: `Exception` if the file is not opened.
         import std.conv : to, text;
         import std.exception : enforce, errnoEnforce;
 
+        // Some libc sanitize the whence input (e.g. glibc), but some don't,
+        // e.g. Microsoft runtime crashes on an invalid origin,
+        // and Musl additionally accept SEEK_DATA & SEEK_HOLE (Linux extension).
+        // To provide a consistent behavior cross platform, we use the glibc check
+        // See also https://issues.dlang.org/show_bug.cgi?id=19797
+        enforce(origin == SEEK_SET || origin == SEEK_CUR ||  origin == SEEK_END,
+                "Invalid `origin` argument passed to `seek`, must be one of: SEEK_SET, SEEK_CUR, SEEK_END");
+
         enforce(isOpen, "Attempting to seek() in an unopened file");
         version (Windows)
         {
@@ -1110,9 +1170,6 @@ Throws: `Exception` if the file is not opened.
             {
                 alias fseekFun = _fseeki64;
                 alias off_t = long;
-                // Issue 19797
-                enforce(origin >= SEEK_SET && origin <= SEEK_END,
-                        "Could not seek in file `"~_name~"' (Invalid argument)");
             }
             else
             {
@@ -1156,7 +1213,8 @@ Throws: `Exception` if the file is not opened.
         // f.rawWrite("abcdefghijklmnopqrstuvwxyz");
         // f.seek(-3, SEEK_END);
         // assert(f.readln() == "xyz");
-        assertThrown(f.seek(0, 3));
+
+        assertThrown(f.seek(0, ushort.max));
     }
 
 /**
@@ -1434,6 +1492,7 @@ Removes the lock over the specified file segment.
     }
 
     version (Posix)
+    static if (__traits(compiles, { import std.process : spawnProcess; }))
     @system unittest
     {
         static import std.file;
@@ -1711,6 +1770,7 @@ Example:
 // Read lines from `stdin` into a string
 // Ignore lines starting with '#'
 // Write the string to `stdout`
+import std.stdio;
 
 void main()
 {
@@ -1741,6 +1801,7 @@ largest buffer returned by `readln`:
 Example:
 ---
 // Read lines from `stdin` and count words
+import std.array, std.stdio;
 
 void main()
 {
@@ -1812,7 +1873,8 @@ is recommended if you want to process a complete file.
         assert(buffer[beyond] == 'a');
     }
 
-    @system unittest // bugzilla 15293
+    // https://issues.dlang.org/show_bug.cgi?id=15293
+    @system unittest
     {
         // @system due to readln
         static import std.file;
@@ -1975,7 +2037,7 @@ $(CONSOLE
         f.readf("%s\n", &s);
         assert(s == "world", "["~s~"]");
 
-        // Issue 11698
+        // https://issues.dlang.org/show_bug.cgi?id=11698
         bool b1, b2;
         f.readf("%s\n%s\n", &b1, &b2);
         assert(b1 == true && b2 == false);
@@ -1996,13 +2058,14 @@ $(CONSOLE
         assert(s1 == "hello");
         assert(s2 == "world");
 
-        // Issue 11698
+        // https://issues.dlang.org/show_bug.cgi?id=11698
         bool b1, b2;
         f.readf("%s\n%s\n", &b1, b2);
         assert(b1 == true && b2 == false);
     }
 
-    // Issue 12260 - Nice error of std.stdio.readf with newlines
+    // Nice error of std.stdio.readf with newlines
+    // https://issues.dlang.org/show_bug.cgi?id=12260
     @system unittest
     {
         static import std.file;
@@ -2199,7 +2262,7 @@ Allows to directly use range operations on lines of a file.
                     else static if (isArray!Terminator)
                     {
                         static assert(
-                            is(Unqual!(ElementEncodingType!Terminator) == Char));
+                            is(immutable ElementEncodingType!Terminator == immutable Char));
                         const tlen = terminator.length;
                     }
                     else
@@ -2209,14 +2272,6 @@ Allows to directly use range operations on lines of a file.
                 haveLine = true;
             }
         }
-    }
-
-    // @@@DEPRECATED_2019-01@@@
-    deprecated("Use .byLine")
-    struct ByLine(Char, Terminator)
-    {
-        ByLineImpl!(Char, Terminator) payload;
-        alias payload this;
     }
 
 /**
@@ -2290,7 +2345,7 @@ the contents may well have changed).
 /// ditto
     auto byLine(Terminator, Char = char)
             (KeepTerminator keepTerminator, Terminator terminator)
-    if (is(Unqual!(ElementEncodingType!Terminator) == Char))
+    if (is(immutable ElementEncodingType!Terminator == immutable Char))
     {
         return ByLineImpl!(Char, Terminator)(this, keepTerminator, terminator);
     }
@@ -2312,11 +2367,13 @@ the contents may well have changed).
         }}
     }
 
-    @system unittest // Issue 19980
+    // https://issues.dlang.org/show_bug.cgi?id=19980
+    @system unittest
     {
         static import std.file;
         auto deleteme = testFilename();
         std.file.write(deleteme, "Line 1\nLine 2\nLine 3\n");
+        scope(success) std.file.remove(deleteme);
 
         auto f = File(deleteme);
         f.byLine();
@@ -2441,7 +2498,7 @@ $(REF readText, std,file)
 /// ditto
     auto byLineCopy(Terminator, Char = immutable char)
             (KeepTerminator keepTerminator, Terminator terminator)
-    if (is(Unqual!(ElementEncodingType!Terminator) == Unqual!Char))
+    if (is(immutable ElementEncodingType!Terminator == immutable Char))
     {
         return ByLineCopy!(Char, Terminator)(this, keepTerminator, terminator);
     }
@@ -2502,7 +2559,7 @@ $(REF readText, std,file)
             }
             assert(i == witness.length, text(i, " != ", witness.length));
 
-            // Issue 11830
+            // https://issues.dlang.org/show_bug.cgi?id=11830
             auto walkedLength = File(deleteme).byLine(kt, term).walkLength;
             assert(walkedLength == witness.length, text(walkedLength, " != ", witness.length));
 
@@ -2562,7 +2619,7 @@ $(REF readText, std,file)
             auto file = File.tmpfile();
         file.write("1\n2\n3\n");
 
-        // bug 9599
+        // https://issues.dlang.org/show_bug.cgi?id=9599
         file.rewind();
         File.ByLineImpl!(char, char) fbl = file.byLine();
         auto fbl2 = fbl;
@@ -2708,14 +2765,6 @@ $(REF readText, std,file)
             }
             prime();
         }
-    }
-
-    // @@@DEPRECATED_2019-01@@@
-    deprecated("Use .byChunk")
-    struct ByChunk
-    {
-        ByChunkImpl payload;
-        alias payload this;
     }
 
 /**
@@ -2970,7 +3019,7 @@ is empty, throws an `Exception`. In case of an I/O error throws
             }
             else static if (c.sizeof == 2)
             {
-                import std.utf : encode;
+                import std.utf : encode, decode;
 
                 if (orientation_ <= 0)
                 {
@@ -2990,7 +3039,8 @@ is empty, throws an `Exception`. In case of an I/O error throws
                         if (highSurrogate != '\0')
                         {
                             immutable wchar[2] rbuf = [highSurrogate, c];
-                            d = rbuf[].front;
+                            size_t index = 0;
+                            d = decode(rbuf[], index);
                             highSurrogate = 0;
                         }
                         char[4] wbuf;
@@ -3119,7 +3169,7 @@ is empty, throws an `Exception`. In case of an I/O error throws
                 {
                     import core.atomic : atomicOp;
 
-                    // @@@BUG@@@ 4243
+                    // https://issues.dlang.org/show_bug.cgi?id=4243
                     oldInfo = __fhnd_info[fd];
                     atomicOp!"&="(__fhnd_info[fd], ~FHND_TEXT);
                 }
@@ -3139,7 +3189,7 @@ is empty, throws an `Exception`. In case of an I/O error throws
                 .fflush(fps); // before restoring translation mode
                 version (DIGITAL_MARS_STDIO)
                 {
-                    // @@@BUG@@@ 4243
+                    // https://issues.dlang.org/show_bug.cgi?id=4243
                     __fhnd_info[fd] = oldInfo;
                 }
                 ._setmode(fd, oldMode);
@@ -3197,7 +3247,7 @@ Example:
 Produce a grayscale image of the $(LINK2 https://en.wikipedia.org/wiki/Mandelbrot_set, Mandelbrot set)
 in binary $(LINK2 https://en.wikipedia.org/wiki/Netpbm_format, Netpbm format) to standard output.
 ---
-import std.algorithm, std.range, std.stdio;
+import std.algorithm, std.complex, std.range, std.stdio;
 
 void main()
 {
@@ -3207,7 +3257,7 @@ void main()
     iota(-1, 3, 2.0/size).map!(y =>
         iota(-1.5, 0.5, 2.0/size).map!(x =>
             cast(ubyte)(1+
-                recurrence!((a, n) => x + y*1i + a[n-1]^^2)(0+0i)
+                recurrence!((a, n) => x + y * complex(0, 1) + a[n-1]^^2)(complex(0))
                 .take(ubyte.max)
                 .countUntil!(z => z.re^^2 + z.im^^2 > 4))
         )
@@ -3303,7 +3353,22 @@ void main()
         assert(dcharsOut == "foo");
     }
 
-/// Get the size of the file, ulong.max if file is not searchable, but still throws if an actual error occurs.
+/** Returns the size of the file in bytes, ulong.max if file is not searchable or throws if the operation fails.
+Example:
+---
+import std.stdio, std.file;
+
+void main()
+{
+    string deleteme = "delete.me";
+    auto file_handle = File(deleteme, "w");
+    file_handle.write("abc"); //create temporary file
+    scope(exit) deleteme.remove; //remove temporary file at scope exit
+
+    assert(file_handle.size() == 3); //check if file size is 3 bytes
+}
+---
+*/
     @property ulong size() @safe
     {
         import std.exception : collectException;
@@ -3485,8 +3550,10 @@ void main()
         writer.put("日本語"d);
         writer.put('日');
         writer.put(chain(only('本'), only('語')));
-        writer.put(repeat('#', 12)); // BUG 11945
-        writer.put(cast(immutable(ubyte)[])"日本語"); // Bug 17229
+        // https://issues.dlang.org/show_bug.cgi?id=11945
+        writer.put(repeat('#', 12));
+        // https://issues.dlang.org/show_bug.cgi?id=17229
+        writer.put(cast(immutable(ubyte)[])"日本語");
     }
     assert(File(deleteme).readln() == "日本語日本語日本語日本語############日本語");
 }
@@ -3545,7 +3612,7 @@ void main()
 
 version (StdStressTest)
 {
-    // issue 15768
+    // https://issues.dlang.org/show_bug.cgi?id=15768
     @system unittest
     {
         import std.parallelism : parallel;
@@ -3680,7 +3747,8 @@ struct LockingTextReader
     assert(x == 3);
 }
 
-@system unittest // bugzilla 13686
+// https://issues.dlang.org/show_bug.cgi?id=13686
+@system unittest
 {
     import std.algorithm.comparison : equal;
     static import std.file;
@@ -3698,7 +3766,8 @@ struct LockingTextReader
     assert(equal(ltr, "Тест".byDchar));
 }
 
-@system unittest // bugzilla 12320
+// https://issues.dlang.org/show_bug.cgi?id=12320
+@system unittest
 {
     static import std.file;
     auto deleteme = testFilename();
@@ -3712,7 +3781,8 @@ struct LockingTextReader
     assert(ltr.empty);
 }
 
-@system unittest // bugzilla 14861
+// https://issues.dlang.org/show_bug.cgi?id=14861
+@system unittest
 {
     // @system due to readf
     static import std.file;
@@ -3818,7 +3888,7 @@ if (!is(T[0] : File))
  * Throws:
  *      In case of an I/O error, throws an $(LREF StdioException).
  * Example:
- *        Reads `stdin` and writes it to `stdout` with a argument
+ *        Reads `stdin` and writes it to `stdout` with an argument
  *        counter.
 ---
 import std.stdio;
@@ -3836,7 +3906,6 @@ void main()
  */
 void writeln(T...)(T args)
 {
-    import std.traits : isAggregateType;
     static if (T.length == 0)
     {
         import std.exception : enforce;
@@ -3844,17 +3913,13 @@ void writeln(T...)(T args)
         enforce(fputc('\n', .trustedStdout._p.handle) != EOF, "fputc failed");
     }
     else static if (T.length == 1 &&
-                    is(typeof(args[0]) : const(char)[]) &&
-                    !is(typeof(args[0]) == enum) &&
-                    !is(Unqual!(typeof(args[0])) == typeof(null)) &&
-                    !isAggregateType!(typeof(args[0])))
+                    is(T[0] : const(char)[]) &&
+                    (is(T[0] == U[], U) || __traits(isStaticArray, T[0])))
     {
-        import std.traits : isStaticArray;
-
         // Specialization for strings - a very frequent case
         auto w = .trustedStdout.lockingTextWriter();
 
-        static if (isStaticArray!(typeof(args[0])))
+        static if (__traits(isStaticArray, T[0]))
         {
             w.put(args[0][]);
         }
@@ -3878,15 +3943,19 @@ void writeln(T...)(T args)
 
     if (false) writeln("wyda");
 
-    // bug 8040
+    // https://issues.dlang.org/show_bug.cgi?id=8040
     if (false) writeln(null);
     if (false) writeln(">", null, "<");
 
-    // Bugzilla 14041
+    // https://issues.dlang.org/show_bug.cgi?id=14041
     if (false)
     {
         char[8] a;
         writeln(a);
+        immutable b = a;
+        b.writeln;
+        const c = a[];
+        c.writeln;
     }
 }
 
@@ -3924,9 +3993,9 @@ void writeln(T...)(T args)
 
     stdout.open(deleteme, "w");
     writeln("Hello!"c);
-    writeln("Hello!"w);    // bug 8386
-    writeln("Hello!"d);    // bug 8386
-    writeln("embedded\0null"c); // bug 8730
+    writeln("Hello!"w);    // https://issues.dlang.org/show_bug.cgi?id=8386
+    writeln("Hello!"d);    // https://issues.dlang.org/show_bug.cgi?id=8386
+    writeln("embedded\0null"c); // https://issues.dlang.org/show_bug.cgi?id=8730
     stdout.close();
     version (Windows)
         assert(cast(char[]) std.file.read(deleteme) ==
@@ -4827,7 +4896,7 @@ enum StdFileHandle: string
         stdin as a $(LREF File).
 
     Note:
-        The returned $(LREF File) wraps $(REF stdin,core,stdio), and
+        The returned $(LREF File) wraps $(REF stdin,core,stdc,stdio), and
         is therefore thread global. Reassigning `stdin` to a different
         `File` must be done in a single-threaded or locked context in
         order to avoid race conditions.
@@ -4865,7 +4934,7 @@ alias stdin = makeGlobal!(StdFileHandle.stdin);
         stdout as a $(LREF File).
 
     Note:
-        The returned $(LREF File) wraps $(REF stdout,core,stdio), and
+        The returned $(LREF File) wraps $(REF stdout,core,stdc,stdio), and
         is therefore thread global. Reassigning `stdout` to a different
         `File` must be done in a single-threaded or locked context in
         order to avoid race conditions.
@@ -4928,7 +4997,7 @@ alias stdout = makeGlobal!(StdFileHandle.stdout);
         stderr as a $(LREF File).
 
     Note:
-        The returned $(LREF File) wraps $(REF stderr,core,stdio), and
+        The returned $(LREF File) wraps $(REF stderr,core,stdc,stdio), and
         is therefore thread global. Reassigning `stderr` to a different
         `File` must be done in a single-threaded or locked context in
         order to avoid race conditions.
@@ -5432,7 +5501,8 @@ private size_t readlnImpl(FILE* fps, ref char[] buf, dchar terminator, File.Orie
     char[] t = ln[0 .. 2];
     t ~= 't';
     assert(t == "abt");
-    assert(ln == "abcd\n");  // bug 13856: ln stomped to "abtd"
+    // https://issues.dlang.org/show_bug.cgi?id=13856: ln stomped to "abtd"
+    assert(ln == "abcd\n");
 
     // it can also stomp the array length
     ln = new char[4];
@@ -5501,12 +5571,13 @@ version (linux)
     }
 }
 
-version (unittest) private string testFilename(string file = __FILE__, size_t line = __LINE__) @safe
+version (StdUnittest) private string testFilename(string file = __FILE__, size_t line = __LINE__) @safe
 {
     import std.conv : text;
     import std.file : deleteme;
     import std.path : baseName;
 
-    // filename intentionally contains non-ASCII (Russian) characters for test Issue 7648
+    // filename intentionally contains non-ASCII (Russian) characters for
+    // https://issues.dlang.org/show_bug.cgi?id=7648
     return text(deleteme, "-детка.", baseName(file), ".", line);
 }

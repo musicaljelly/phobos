@@ -143,7 +143,7 @@ Source:    $(PHOBOSSRC std/string.d)
 */
 module std.string;
 
-version (unittest)
+version (StdUnittest)
 {
 private:
     struct TestAliasedString
@@ -224,9 +224,9 @@ if (isSomeChar!Char)
 {
     import core.stdc.stddef : wchar_t;
 
-    static if (is(Unqual!Char == char))
+    static if (is(immutable Char == immutable char))
         import core.stdc.string : cstrlen = strlen;
-    else static if (is(Unqual!Char == wchar_t))
+    else static if (is(immutable Char == immutable wchar_t))
         import core.stdc.wchar_ : cstrlen = wcslen;
     else
         static size_t cstrlen(scope const Char* s)
@@ -1327,7 +1327,7 @@ if (isSomeChar!Char1 && isSomeChar!Char2)
 
     if (cs == Yes.caseSensitive)
     {
-        static if (is(Unqual!Char1 == Unqual!Char2))
+        static if (is(immutable Char1 == immutable Char2))
         {
             import core.stdc.string : memcmp;
 
@@ -1339,12 +1339,8 @@ if (isSomeChar!Char1 && isSomeChar!Char2)
                 {
                     if (__ctfe)
                     {
-                        foreach (j; 1 .. sub.length)
-                        {
-                            if (s[i + j] != sub[j])
-                                continue;
-                        }
-                        return i;
+                        if (s[i + 1 .. i + sub.length] == sub[1 .. $])
+                            return i;
                     }
                     else
                     {
@@ -1501,7 +1497,8 @@ if (isSomeChar!Char1 && isSomeChar!Char2)
     });
 }
 
-@safe pure unittest // issue13529
+// https://issues.dlang.org/show_bug.cgi?id=13529
+@safe pure unittest
 {
     import std.conv : to;
     static foreach (S; AliasSeq!(string, wstring, dstring))
@@ -1565,6 +1562,19 @@ if (isSomeChar!Char1 && isSomeChar!Char2)
             assert(lastIndexOf("\U00010143\u0100\U00010143hello"d, to!S("\u0100"), 3, cs) == 1, csString);
         }
     }
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=20783
+@safe pure @nogc unittest
+{
+    enum lastIndex = "aa".lastIndexOf("ab");
+    assert(lastIndex == -1);
+}
+
+@safe pure @nogc unittest
+{
+    enum lastIndex = "hello hello hell h".lastIndexOf("hello");
+    assert(lastIndex == 6);
 }
 
 private ptrdiff_t indexOfAnyNeitherImpl(bool forward, bool any, Char, Char2)(
@@ -3003,8 +3013,8 @@ if (isForwardRange!Range && isSomeChar!(ElementEncodingType!Range) &&
     static import std.ascii;
     static import std.uni;
 
-    static if (is(Unqual!(ElementEncodingType!Range) == dchar)
-        || is(Unqual!(ElementEncodingType!Range) == wchar))
+    static if (is(immutable ElementEncodingType!Range == immutable dchar)
+        || is(immutable ElementEncodingType!Range == immutable wchar))
     {
         // Decoding is never needed for dchar. It happens not to be needed
         // here for wchar because no whitepace is outside the basic
@@ -3705,7 +3715,7 @@ if ((isBidirectionalRange!Range && isSomeChar!(ElementEncodingType!Range) ||
 
     alias C1 = ElementEncodingType!Range;
 
-    static if (is(Unqual!C1 == Unqual!C2) && (isSomeString!Range || (hasSlicing!Range && C2.sizeof == 4)))
+    static if (is(immutable C1 == immutable C2) && (isSomeString!Range || (hasSlicing!Range && C2.sizeof == 4)))
     {
         import std.algorithm.searching : endsWith;
         if (str.endsWith(delimiter))
@@ -3856,7 +3866,7 @@ if ((isForwardRange!Range && isSomeChar!(ElementEncodingType!Range) ||
 {
     alias C1 = ElementEncodingType!Range;
 
-    static if (is(Unqual!C1 == Unqual!C2) && (isSomeString!Range || (hasSlicing!Range && C2.sizeof == 4)))
+    static if (is(immutable C1 == immutable C2) && (isSomeString!Range || (hasSlicing!Range && C2.sizeof == 4)))
     {
         import std.algorithm.searching : startsWith;
         if (str.startsWith(delimiter))
@@ -5234,7 +5244,8 @@ if (isSomeChar!C1 && isSomeChar!C2)
     assert(translate("hello world", transTable2) == "h5llorange worangerld");
 }
 
-@safe pure unittest // issue 13018
+// https://issues.dlang.org/show_bug.cgi?id=13018
+@safe pure unittest
 {
     immutable dchar[dchar] transTable1 = ['e' : '5', 'o' : '7', '5': 'q'];
     assert(translate("hello world", transTable1) == "h5ll7 w7rld");
@@ -5255,7 +5266,8 @@ if (isSomeChar!C1 && isSomeChar!C2)
     static foreach (S; AliasSeq!( char[], const( char)[], immutable( char)[],
                           wchar[], const(wchar)[], immutable(wchar)[],
                           dchar[], const(dchar)[], immutable(dchar)[]))
-    {(){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
+    {(){ // workaround slow optimizations for large functions
+         // https://issues.dlang.org/show_bug.cgi?id=2396
         assert(translate(to!S("hello world"), cast(dchar[dchar])['h' : 'q', 'l' : '5']) ==
                to!S("qe55o wor5d"));
         assert(translate(to!S("hello world"), cast(dchar[dchar])['o' : 'l', 'l' : '\U00010143']) ==
@@ -5269,7 +5281,8 @@ if (isSomeChar!C1 && isSomeChar!C2)
         static foreach (T; AliasSeq!( char[], const( char)[], immutable( char)[],
                               wchar[], const(wchar)[], immutable(wchar)[],
                               dchar[], const(dchar)[], immutable(dchar)[]))
-        (){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
+        (){ // workaround slow optimizations for large functions
+            // https://issues.dlang.org/show_bug.cgi?id=2396
             static foreach (R; AliasSeq!(dchar[dchar], const dchar[dchar],
                         immutable dchar[dchar]))
             {{
@@ -5313,7 +5326,8 @@ if (isSomeChar!C1 && isSomeString!S && isSomeChar!C2)
     static foreach (S; AliasSeq!( char[], const( char)[], immutable( char)[],
                           wchar[], const(wchar)[], immutable(wchar)[],
                           dchar[], const(dchar)[], immutable(dchar)[]))
-    {(){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
+    {(){ // workaround slow optimizations for large functions
+         // https://issues.dlang.org/show_bug.cgi?id=2396
         assert(translate(to!S("hello world"), ['h' : "yellow", 'l' : "42"]) ==
                to!S("yellowe4242o wor42d"));
         assert(translate(to!S("hello world"), ['o' : "owl", 'l' : "\U00010143\U00010143"]) ==
@@ -5331,8 +5345,8 @@ if (isSomeChar!C1 && isSomeString!S && isSomeChar!C2)
         static foreach (T; AliasSeq!( char[], const( char)[], immutable( char)[],
                               wchar[], const(wchar)[], immutable(wchar)[],
                               dchar[], const(dchar)[], immutable(dchar)[]))
-        (){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
-
+        (){ // workaround slow optimizations for large functions
+            // https://issues.dlang.org/show_bug.cgi?id=2396
             static foreach (R; AliasSeq!(string[dchar], const string[dchar],
                         immutable string[dchar]))
             {{
@@ -5396,7 +5410,8 @@ if (isSomeChar!C1 && isSomeChar!C2 && isOutputRange!(Buffer, C1))
     assert(buffer.data == "h5llorange worangerld");
 }
 
-@safe pure unittest // issue 13018
+// https://issues.dlang.org/show_bug.cgi?id=13018
+@safe pure unittest
 {
     import std.array : appender;
     immutable dchar[dchar] transTable1 = ['e' : '5', 'o' : '7', '5': 'q'];
@@ -5425,7 +5440,7 @@ if (isSomeChar!C1 && isSomeString!S && isSomeChar!C2 && isOutputRange!(Buffer, S
 }
 
 private void translateImpl(C1, T, C2, Buffer)(const(C1)[] str,
-                                      T transTable,
+                                      scope T transTable,
                                       const(C2)[] toRemove,
                                       Buffer buffer)
 {
@@ -5484,7 +5499,7 @@ private void translateImpl(C1, T, C2, Buffer)(const(C1)[] str,
   +/
 C[] translate(C = immutable char)(scope const(char)[] str, scope const(char)[] transTable,
               scope const(char)[] toRemove = null) @trusted pure nothrow
-if (is(Unqual!C == char))
+if (is(immutable C == immutable char))
 in
 {
     import std.conv : to;
@@ -5642,7 +5657,7 @@ do
   +/
 void translate(C = immutable char, Buffer)(scope const(char)[] str, scope const(char)[] transTable,
         scope const(char)[] toRemove, Buffer buffer) @trusted pure
-if (is(Unqual!C == char) && isOutputRange!(Buffer, char))
+if (is(immutable C == immutable char) && isOutputRange!(Buffer, char))
 in
 {
     assert(transTable.length == 256, format!
@@ -5675,273 +5690,6 @@ do
     translate("hello world", transTable1, "low", buffer);
     assert(buffer.data == "h5 rd");
 }
-
-//@@@DEPRECATED_2.086@@@
-deprecated("This function is obsolete. It is available in https://github.com/dlang/undeaD if necessary.")
-bool inPattern(S)(dchar c, in S pattern) @safe pure @nogc
-if (isSomeString!S)
-{
-    bool result = false;
-    int range = 0;
-    dchar lastc;
-
-    foreach (size_t i, dchar p; pattern)
-    {
-        if (p == '^' && i == 0)
-        {
-            result = true;
-            if (i + 1 == pattern.length)
-                return (c == p);    // or should this be an error?
-        }
-        else if (range)
-        {
-            range = 0;
-            if (lastc <= c && c <= p || c == p)
-                return !result;
-        }
-        else if (p == '-' && i > result && i + 1 < pattern.length)
-        {
-            range = 1;
-            continue;
-        }
-        else if (c == p)
-            return !result;
-        lastc = p;
-    }
-    return result;
-}
-
-
-deprecated
-@safe pure @nogc unittest
-{
-    import std.conv : to;
-    import std.exception : assertCTFEable;
-
-    assertCTFEable!(
-    {
-    assert(inPattern('x', "x") == 1);
-    assert(inPattern('x', "y") == 0);
-    assert(inPattern('x', string.init) == 0);
-    assert(inPattern('x', "^y") == 1);
-    assert(inPattern('x', "yxxy") == 1);
-    assert(inPattern('x', "^yxxy") == 0);
-    assert(inPattern('x', "^abcd") == 1);
-    assert(inPattern('^', "^^") == 0);
-    assert(inPattern('^', "^") == 1);
-    assert(inPattern('^', "a^") == 1);
-    assert(inPattern('x', "a-z") == 1);
-    assert(inPattern('x', "A-Z") == 0);
-    assert(inPattern('x', "^a-z") == 0);
-    assert(inPattern('x', "^A-Z") == 1);
-    assert(inPattern('-', "a-") == 1);
-    assert(inPattern('-', "^A-") == 0);
-    assert(inPattern('a', "z-a") == 1);
-    assert(inPattern('z', "z-a") == 1);
-    assert(inPattern('x', "z-a") == 0);
-    });
-}
-
-//@@@DEPRECATED_2.086@@@
-deprecated("This function is obsolete. It is available in https://github.com/dlang/undeaD if necessary.")
-bool inPattern(S)(dchar c, S[] patterns) @safe pure @nogc
-if (isSomeString!S)
-{
-    foreach (string pattern; patterns)
-    {
-        if (!inPattern(c, pattern))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-//@@@DEPRECATED_2.086@@@
-deprecated("This function is obsolete. It is available in https://github.com/dlang/undeaD if necessary.")
-size_t countchars(S, S1)(S s, in S1 pattern) @safe pure @nogc
-if (isSomeString!S && isSomeString!S1)
-{
-    size_t count;
-    foreach (dchar c; s)
-    {
-        count += inPattern(c, pattern);
-    }
-    return count;
-}
-
-deprecated
-@safe pure @nogc unittest
-{
-    import std.conv : to;
-    import std.exception : assertCTFEable;
-
-    assertCTFEable!(
-    {
-    assert(countchars("abc", "a-c") == 3);
-    assert(countchars("hello world", "or") == 3);
-    });
-}
-
-//@@@DEPRECATED_2.086@@@
-deprecated("This function is obsolete. It is available in https://github.com/dlang/undeaD if necessary.")
-S removechars(S)(S s, in S pattern) @safe pure
-if (isSomeString!S)
-{
-    import std.utf : encode;
-
-    Unqual!(typeof(s[0]))[] r;
-    bool changed = false;
-
-    foreach (size_t i, dchar c; s)
-    {
-        if (inPattern(c, pattern))
-        {
-            if (!changed)
-            {
-                changed = true;
-                r = s[0 .. i].dup;
-            }
-            continue;
-        }
-        if (changed)
-        {
-            encode(r, c);
-        }
-    }
-    if (changed)
-        return r;
-    else
-        return s;
-}
-
-deprecated
-@safe pure unittest
-{
-    import std.conv : to;
-    import std.exception : assertCTFEable;
-
-    assertCTFEable!(
-    {
-    assert(removechars("abc", "a-c").length == 0);
-    assert(removechars("hello world", "or") == "hell wld");
-    assert(removechars("hello world", "d") == "hello worl");
-    assert(removechars("hah", "h") == "a");
-    });
-}
-
-deprecated
-@safe pure unittest
-{
-    assert(removechars("abc", "x") == "abc");
-}
-
-//@@@DEPRECATED_2.086@@@
-deprecated("This function is obsolete. It is available in https://github.com/dlang/undeaD if necessary.")
-S squeeze(S)(S s, in S pattern = null)
-{
-    import std.utf : encode, stride;
-
-    Unqual!(typeof(s[0]))[] r;
-    dchar lastc;
-    size_t lasti;
-    int run;
-    bool changed;
-
-    foreach (size_t i, dchar c; s)
-    {
-        if (run && lastc == c)
-        {
-            changed = true;
-        }
-        else if (pattern is null || inPattern(c, pattern))
-        {
-            run = 1;
-            if (changed)
-            {
-                if (r is null)
-                    r = s[0 .. lasti].dup;
-                encode(r, c);
-            }
-            else
-                lasti = i + stride(s, i);
-            lastc = c;
-        }
-        else
-        {
-            run = 0;
-            if (changed)
-            {
-                if (r is null)
-                    r = s[0 .. lasti].dup;
-                encode(r, c);
-            }
-        }
-    }
-    return changed ? ((r is null) ? s[0 .. lasti] : cast(S) r) : s;
-}
-
-deprecated
-@system pure unittest
-{
-    import std.conv : to;
-    import std.exception : assertCTFEable;
-
-    assertCTFEable!(
-    {
-    string s;
-
-    assert(squeeze("hello") == "helo");
-
-    s = "abcd";
-    assert(squeeze(s) is s);
-    s = "xyzz";
-    assert(squeeze(s).ptr == s.ptr); // should just be a slice
-
-    assert(squeeze("hello goodbyee", "oe") == "hello godbye");
-    });
-}
-
-//@@@DEPRECATED_2.086@@@
-deprecated("This function is obsolete. It is available in https://github.com/dlang/undeaD if necessary.")
-S1 munch(S1, S2)(ref S1 s, S2 pattern) @safe pure @nogc
-{
-    size_t j = s.length;
-    foreach (i, dchar c; s)
-    {
-        if (!inPattern(c, pattern))
-        {
-            j = i;
-            break;
-        }
-    }
-    scope(exit) s = s[j .. $];
-    return s[0 .. j];
-}
-
-///
-deprecated
-@safe pure @nogc unittest
-{
-    string s = "123abc";
-    string t = munch(s, "0123456789");
-    assert(t == "123" && s == "abc");
-    t = munch(s, "0123456789");
-    assert(t == "" && s == "abc");
-}
-
-deprecated
-@safe pure @nogc unittest
-{
-    string s = "123€abc";
-    string t = munch(s, "0123456789");
-    assert(t == "123" && s == "€abc");
-    t = munch(s, "0123456789");
-    assert(t == "" && s == "€abc");
-    t = munch(s, "£$€¥");
-    assert(t == "€" && s == "abc");
-}
-
 
 /**********************************************
  * Return string that is the 'successor' to s[].
@@ -6914,7 +6662,7 @@ if ((isInputRange!Range && isSomeChar!(Unqual!(ElementEncodingType!Range)) ||
     isNarrowString!Range) &&
     !isConvertibleToString!Range)
 {
-    static if (is(Unqual!(ElementEncodingType!Range) == char))
+    static if (is(immutable ElementEncodingType!Range == immutable char))
     {
         // decoding needed for chars
         import std.utf : byDchar;
@@ -7394,16 +7142,27 @@ Params:
 Returns:
     arr retyped as an array of chars, wchars, or dchars
 
+Throws:
+    In debug mode `AssertError`, when the result is not a well-formed UTF string.
+
 See_Also: $(LREF representation)
 */
-auto assumeUTF(T)(T[] arr) pure
-if (staticIndexOf!(Unqual!T, ubyte, ushort, uint) != -1)
+auto assumeUTF(T)(T[] arr)
+if (staticIndexOf!(immutable T, immutable ubyte, immutable ushort, immutable uint) != -1)
 {
     import std.traits : ModifyTypePreservingTQ;
+    import std.exception : collectException;
     import std.utf : validate;
+
     alias ToUTFType(U) = AliasSeq!(char, wchar, dchar)[U.sizeof / 2];
-    auto asUTF = cast(ModifyTypePreservingTQ!(ToUTFType, T)[])arr;
-    debug validate(asUTF);
+    auto asUTF = cast(ModifyTypePreservingTQ!(ToUTFType, T)[]) arr;
+
+    debug
+    {
+        scope ex = collectException(validate(asUTF));
+        assert(!ex, ex.msg);
+    }
+
     return asUTF;
 }
 
@@ -7414,7 +7173,7 @@ if (staticIndexOf!(Unqual!T, ubyte, ushort, uint) != -1)
     immutable(ubyte)[] b = a.representation;
     string c = b.assumeUTF;
 
-    assert(a == c);
+    assert(c == "Hölo World");
 }
 
 pure @system unittest
@@ -7451,4 +7210,17 @@ pure @system unittest
         assert(equal(jt, htc));
         assert(equal(jt, hti));
     }}
+}
+
+pure @system unittest
+{
+    import core.exception : AssertError;
+    import std.exception : assertThrown, assertNotThrown;
+
+    immutable(ubyte)[] a = [ 0xC0 ];
+
+    debug
+        assertThrown!AssertError( () nothrow @nogc @safe {cast(void) a.assumeUTF;} () );
+    else
+        assertNotThrown!AssertError( () nothrow @nogc @safe {cast(void) a.assumeUTF;} () );
 }

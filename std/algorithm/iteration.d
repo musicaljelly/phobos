@@ -207,6 +207,12 @@ if (isBidirectionalRange!Range)
     assert(counter == iota(-4, 5).length);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=15891
+@safe pure unittest
+{
+    assert([1].map!(x=>[x].map!(y=>y)).cache.front.front == 1);
+}
+
 /++
 Tip: `cache` is eager when evaluating elements. If calling front on the
 underlying range has a side effect, it will be observable before calling
@@ -343,9 +349,17 @@ private struct _Cache(R, bool bidir)
         source = range;
         if (!range.empty)
         {
-             caches[0] = source.front;
-             static if (bidir)
-                 caches[1] = source.back;
+            caches[0] = source.front;
+            static if (bidir)
+                caches[1] = source.back;
+        }
+        else
+        {
+            // needed, because the compiler cannot deduce, that 'caches' is initialized
+            // see https://issues.dlang.org/show_bug.cgi?id=15891
+            caches[0] = UE.init;
+            static if (bidir)
+                caches[1] = UE.init;
         }
     }
 
@@ -380,7 +394,12 @@ private struct _Cache(R, bool bidir)
         if (!source.empty)
             caches[0] = source.front;
         else
-            caches = CacheTypes.init;
+        {
+            // see https://issues.dlang.org/show_bug.cgi?id=15891
+            caches[0] = UE.init;
+            static if (bidir)
+                caches[1] = UE.init;
+        }
     }
     static if (bidir) void popBack()
     {
@@ -389,7 +408,11 @@ private struct _Cache(R, bool bidir)
         if (!source.empty)
             caches[1] = source.back;
         else
-            caches = CacheTypes.init;
+        {
+            // see https://issues.dlang.org/show_bug.cgi?id=15891
+            caches[0] = UE.init;
+            caches[1] = UE.init;
+        }
     }
 
     static if (isForwardRange!R)
@@ -479,7 +502,9 @@ if (fun.length >= 1)
             alias _funs = staticMap!(unaryFun, fun);
             alias _fun = adjoin!_funs;
 
-            // Once DMD issue #5710 is fixed, this validation loop can be moved into a template.
+            // Once https://issues.dlang.org/show_bug.cgi?id=5710 is fixed
+            // accross all compilers (as of 2020-04, it wasn't fixed in LDC and GDC),
+            // this validation loop can be moved into a template.
             foreach (f; _funs)
             {
                 static assert(!is(typeof(f(RE.init)) == void),
@@ -491,7 +516,8 @@ if (fun.length >= 1)
             alias _fun = unaryFun!fun;
             alias _funs = AliasSeq!(_fun);
 
-            // Do the validation separately for single parameters due to DMD issue #15777.
+            // Do the validation separately for single parameters due to
+            // https://issues.dlang.org/show_bug.cgi?id=15777.
             static assert(!is(typeof(_fun(RE.init)) == void),
                 "Mapping function(s) must not return void: " ~ _funs.stringof);
         }
@@ -501,14 +527,13 @@ if (fun.length >= 1)
 }
 
 ///
-@safe unittest
+@safe @nogc unittest
 {
     import std.algorithm.comparison : equal;
-    import std.range : chain;
-    int[] arr1 = [ 1, 2, 3, 4 ];
-    int[] arr2 = [ 5, 6 ];
-    auto squares = map!(a => a * a)(chain(arr1, arr2));
-    assert(equal(squares, [ 1, 4, 9, 16, 25, 36 ]));
+    import std.range : chain, only;
+    auto squares =
+        chain(only(1, 2, 3, 4), only(5, 6)).map!(a => a * a);
+    assert(equal(squares, only(1, 4, 9, 16, 25, 36)));
 }
 
 /**
@@ -543,10 +568,9 @@ it separately:
     assert(equal(stringize([ 1, 2, 3, 4 ]), [ "1", "2", "3", "4" ]));
 }
 
+// Verify workaround for https://issues.dlang.org/show_bug.cgi?id=15777
 @safe unittest
 {
-    // Verify workaround for DMD #15777
-
     import std.algorithm.mutation, std.string;
     auto foo(string[] args)
     {
@@ -606,7 +630,7 @@ private struct MapResult(alias fun, Range)
 
     static if (isRandomAccessRange!R)
     {
-        static if (is(typeof(_input[ulong.max])))
+        static if (is(typeof(Range.init[ulong.max])))
             private alias opIndex_t = ulong;
         else
             private alias opIndex_t = uint;
@@ -783,7 +807,7 @@ private struct MapResult(alias fun, Range)
     assert(equal(ms2[0 .. 2], "日本"w));
     assert(equal(ms3[0 .. 2], "HE"));
 
-    // Issue 5753
+    // https://issues.dlang.org/show_bug.cgi?id=5753
     static void voidFun(int) {}
     static int nonvoidFun(int) { return 0; }
     static assert(!__traits(compiles, map!voidFun([1])));
@@ -792,7 +816,7 @@ private struct MapResult(alias fun, Range)
     static assert(!__traits(compiles, map!(voidFun, nonvoidFun)([1])));
     static assert(!__traits(compiles, map!(a => voidFun(a))([1])));
 
-    // Phobos issue #15480
+    // https://issues.dlang.org/show_bug.cgi?id=15480
     auto dd = map!(z => z * z, c => c * c * c)([ 1, 2, 3, 4 ]);
     assert(dd[0] == tuple(1, 1));
     assert(dd[1] == tuple(4, 8));
@@ -814,7 +838,7 @@ private struct MapResult(alias fun, Range)
 {
     import std.range : iota;
 
-    // Issue #10130 - map of iota with const step.
+    // https://issues.dlang.org/show_bug.cgi?id=10130 - map of iota with const step.
     const step = 2;
     assert(map!(i => i)(iota(0, 10, step)).walkLength == 5);
 
@@ -844,6 +868,23 @@ private struct MapResult(alias fun, Range)
     struct S {int* p;}
     auto m = immutable(S).init.repeat().map!"a".save;
     assert(m.front == immutable(S)(null));
+}
+
+// Issue 20928
+@safe unittest
+{
+    struct Always3
+    {
+        enum empty = false;
+        auto save() { return this; }
+        long front() { return 3; }
+        void popFront() {}
+        long opIndex(ulong i) { return 3; }
+        long opIndex(ulong i) immutable { return 3; }
+    }
+
+    import std.algorithm.iteration : map;
+    Always3.init.map!(e => e)[ulong.max];
 }
 
 // each
@@ -1120,7 +1161,8 @@ public:
     assert(b == [ 3, 4, 5 ]);
 }
 
-// #15358: application of `each` with >2 args (opApply)
+// https://issues.dlang.org/show_bug.cgi?id=15358
+// application of `each` with >2 args (opApply)
 @system unittest
 {
     import std.range : lockstep;
@@ -1135,7 +1177,8 @@ public:
     assert(c == [7,8,9]);
 }
 
-// #15358: application of `each` with >2 args (range interface)
+// https://issues.dlang.org/show_bug.cgi?id=15358
+// application of `each` with >2 args (range interface)
 @safe unittest
 {
     import std.range : zip;
@@ -1150,7 +1193,8 @@ public:
     assert(res == [9, 12, 15]);
 }
 
-// #16255: `each` on opApply doesn't support ref
+// https://issues.dlang.org/show_bug.cgi?id=16255
+// `each` on opApply doesn't support ref
 @safe unittest
 {
     int[] dynamicArray = [1, 2, 3, 4, 5];
@@ -1166,7 +1210,8 @@ public:
     assert(staticArray == [3, 4, 5, 6, 7]);
 }
 
-// #16255: `each` on opApply doesn't support ref
+// https://issues.dlang.org/show_bug.cgi?id=16255
+// `each` on opApply doesn't support ref
 @system unittest
 {
     struct S
@@ -1182,7 +1227,8 @@ public:
     assert(s.x == 2);
 }
 
-// #15357: `each` should behave similar to foreach
+// https://issues.dlang.org/show_bug.cgi?id=15357
+// `each` should behave similar to foreach
 /// `each` works with iterable objects which provide an index variable, along with each element
 @safe unittest
 {
@@ -1199,7 +1245,8 @@ public:
     assert(arr.sum == 4.iota.sum);
 }
 
-// #15357: `each` should behave similar to foreach
+// https://issues.dlang.org/show_bug.cgi?id=15357
+// `each` should behave similar to foreach
 @system unittest
 {
     import std.range : iota, lockstep;
@@ -1226,7 +1273,8 @@ public:
     assert(arrC.sum == 12);
 }
 
-// #15357: `each` should behave similar to foreach
+// https://issues.dlang.org/show_bug.cgi?id=15357
+// `each` should behave similar to foreach
 @system unittest
 {
     import std.range : lockstep;
@@ -1480,7 +1528,7 @@ private struct FilterResult(alias pred, Range)
     assert(equal(filter!underX(list), [ 1, 2, 3, 4 ]));
 }
 
-// issue 19823
+// https://issues.dlang.org/show_bug.cgi?id=19823
 @safe unittest
 {
     import std.algorithm.comparison : equal;
@@ -1771,7 +1819,7 @@ if (isInputRange!R)
     import std.algorithm.comparison : equal;
     import std.typecons : tuple;
 
-    // Issue 13857
+    // https://issues.dlang.org/show_bug.cgi?id=13857
     immutable(int)[] a1 = [1,1,2,2,2,3,4,4,5,6,6,7,8,9,9,9];
     auto g1 = group(a1);
     assert(equal(g1, [ tuple(1, 2u), tuple(2, 3u), tuple(3, 1u),
@@ -1779,18 +1827,18 @@ if (isInputRange!R)
                        tuple(7, 1u), tuple(8, 1u), tuple(9, 3u)
                      ]));
 
-    // Issue 13162
+    // https://issues.dlang.org/show_bug.cgi?id=13162
     immutable(ubyte)[] a2 = [1, 1, 1, 0, 0, 0];
     auto g2 = a2.group;
     assert(equal(g2, [ tuple(1, 3u), tuple(0, 3u) ]));
 
-    // Issue 10104
+    // https://issues.dlang.org/show_bug.cgi?id=10104
     const a3 = [1, 1, 2, 2];
     auto g3 = a3.group;
     assert(equal(g3, [ tuple(1, 2u), tuple(2, 2u) ]));
 
     interface I {}
-    class C : I {}
+    class C : I { override size_t toHash() const nothrow @safe { return 0; } }
     const C[] a4 = [new const C()];
     auto g4 = a4.group!"a is b";
     assert(g4.front[1] == 1);
@@ -1827,11 +1875,13 @@ if (isInputRange!R)
     assert(t.equal([ tuple(3, 1u), tuple(4, 3u), tuple(5, 1u) ]));
 }
 
-pure @safe unittest // issue 18657
+// https://issues.dlang.org/show_bug.cgi?id=18657
+pure @safe unittest
 {
     import std.algorithm.comparison : equal;
     import std.range : refRange;
-    auto r = refRange(&["foo"][0]).group;
+    string s = "foo";
+    auto r = refRange(&s).group;
     assert(equal(r.save, "foo".group));
     assert(equal(r, "foo".group));
 }
@@ -1871,12 +1921,11 @@ if (isInputRange!Range && !isForwardRange!Range)
 
 private template ChunkByImplIsUnary(alias pred, Range)
 {
-    static if (is(typeof(binaryFun!pred(ElementType!Range.init,
-                                        ElementType!Range.init)) : bool))
+    alias e = lvalueOf!(ElementType!Range);
+
+    static if (is(typeof(binaryFun!pred(e, e)) : bool))
         enum ChunkByImplIsUnary = false;
-    else static if (is(typeof(
-            unaryFun!pred(ElementType!Range.init) ==
-            unaryFun!pred(ElementType!Range.init))))
+    else static if (is(typeof(unaryFun!pred(e) == unaryFun!pred(e)) : bool))
         enum ChunkByImplIsUnary = true;
     else
         static assert(0, "chunkBy expects either a binary predicate or "~
@@ -2379,7 +2428,9 @@ version (none) // this example requires support for non-equivalence relations
         assert(!range.empty);    // Opposite of refInputRange test
     }
 
-    /* Issue 93532 - General behavior of non-forward input ranges.
+    /* https://issues.dlang.org/show_bug.cgi?id=19532
+     * General behavior of non-forward input ranges.
+     *
      * - If the same chunk is retrieved multiple times via front, the separate chunk
      *   instances refer to a shared range segment that advances as a single range.
      * - Emptying a chunk via popFront does not implicitly popFront the chunk off
@@ -2494,7 +2545,7 @@ version (none) // this example requires support for non-equivalence relations
         }
     }
 
-    // Issue 93532 - Using roundRobin/chunkBy
+    // https://issues.dlang.org/show_bug.cgi?id=19532 - Using roundRobin/chunkBy
     {
         import std.algorithm.comparison : equal;
         import std.range : roundRobin;
@@ -2518,7 +2569,7 @@ version (none) // this example requires support for non-equivalence relations
         assert(r3.equal!equal(expected));
     }
 
-    // Issue 93532 - Using merge/chunkBy
+    // https://issues.dlang.org/show_bug.cgi?id=19532 - Using merge/chunkBy
     {
         import std.algorithm.comparison : equal;
         import std.algorithm.sorting : merge;
@@ -2541,7 +2592,7 @@ version (none) // this example requires support for non-equivalence relations
         assert(r3.equal!equal(expected));
     }
 
-    // Issue 93532 - Using chunkBy/map-fold
+    // https://issues.dlang.org/show_bug.cgi?id=19532 - Using chunkBy/map-fold
     {
         import std.algorithm.comparison : equal;
         import std.algorithm.iteration : fold, map;
@@ -2565,7 +2616,10 @@ version (none) // this example requires support for non-equivalence relations
         assert(r3.equal(expected));
     }
 
-    // Issues 16169, 17966, 93532 - Using multiwayMerge/chunkBy
+    // https://issues.dlang.org/show_bug.cgi?id=16169
+    // https://issues.dlang.org/show_bug.cgi?id=17966
+    // https://issues.dlang.org/show_bug.cgi?id=19532
+    // Using multiwayMerge/chunkBy
     {
         import std.algorithm.comparison : equal;
         import std.algorithm.setops : multiwayMerge;
@@ -2603,9 +2657,14 @@ version (none) // this example requires support for non-equivalence relations
         }
     }
 
+    // https://issues.dlang.org/show_bug.cgi?id=20496
+    {
+        auto r = [1,1,1,2,2,2,3,3,3];
+        r.chunkBy!((ref e1, ref e2) => e1 == e2);
+    }
 }
 
-// Issue 13595
+// https://issues.dlang.org/show_bug.cgi?id=13595
 version (none) // This requires support for non-equivalence relations
 @system unittest
 {
@@ -2619,7 +2678,7 @@ version (none) // This requires support for non-equivalence relations
     ]));
 }
 
-// Issue 13805
+// https://issues.dlang.org/show_bug.cgi?id=13805
 @system unittest
 {
     [""].map!((s) => s).chunkBy!((x, y) => true);
@@ -2870,7 +2929,7 @@ if (isInputRange!RoR && isInputRange!(ElementType!RoR)
     import std.algorithm.comparison : equal;
     import std.range;
 
-    // Related to issue 8061
+    // Related to https://issues.dlang.org/show_bug.cgi?id=8061
     auto r = joiner([
         inputRangeObject("abc"),
         inputRangeObject("def"),
@@ -2907,7 +2966,7 @@ if (isInputRange!RoR && isInputRange!(ElementType!RoR)
 
     assert(equal(u, "+-abc+-+-def+-"));
 
-    // Issue 13441: only(x) as separator
+    // https://issues.dlang.org/show_bug.cgi?id=13441: only(x) as separator
     string[][] lines = [null];
     lines
         .joiner(only("b"))
@@ -3267,11 +3326,11 @@ if (isInputRange!RoR && isInputRange!(ElementType!RoR))
     import std.range.interfaces : inputRangeObject;
     import std.range : retro;
 
-    // bugzilla 8240
+    // https://issues.dlang.org/show_bug.cgi?id=8240
     assert(equal(joiner([inputRangeObject("")]), ""));
     assert(equal(joiner([inputRangeObject("")]).retro, ""));
 
-    // issue 8792
+    // https://issues.dlang.org/show_bug.cgi?id=8792
     auto b = [[1], [2], [3]];
     auto jb = joiner(b);
     auto js = jb.save;
@@ -3492,7 +3551,7 @@ if (isInputRange!RoR && isInputRange!(ElementType!RoR))
         to!string("Unexpected result: '%s'"d.algoFormat(result)));
 }
 
-// Issue 8061
+// https://issues.dlang.org/show_bug.cgi?id=8061
 @system unittest
 {
     import std.conv : to;
@@ -3569,7 +3628,7 @@ if (isInputRange!RoR && isInputRange!(ElementType!RoR))
     }
 }
 
-// Issue 19850
+// https://issues.dlang.org/show_bug.cgi?id=19850
 @safe pure unittest
 {
     assert([[0]].joiner.save.back == 0);
@@ -3709,7 +3768,7 @@ if (fun.length >= 1)
         alias E = Select!(isInputRange!R, ElementType!R, ForeachType!R);
 
         static if (mustInitialize) bool initialized = false;
-        foreach (/+auto ref+/ E e; r) // @@@4707@@@
+        foreach (/+auto ref+/ E e; r) // https://issues.dlang.org/show_bug.cgi?id=4707
         {
             foreach (i, f; binfuns)
             {
@@ -3918,7 +3977,8 @@ The number of seeds must be correspondingly increased.
 
 @safe unittest
 {
-    // Issue #10408 - Two-function reduce of a const array.
+    // https://issues.dlang.org/show_bug.cgi?id=10408
+    // Two-function reduce of a const array.
     import std.algorithm.comparison : max, min;
     import std.typecons : tuple, Tuple;
 
@@ -3931,7 +3991,7 @@ The number of seeds must be correspondingly increased.
 
 @safe unittest
 {
-    //10709
+    // https://issues.dlang.org/show_bug.cgi?id=10709
     import std.typecons : tuple, Tuple;
 
     enum foo = "a + 0.5 * b";
@@ -3998,7 +4058,8 @@ The number of seeds must be correspondingly increased.
     assert(minmaxElement([1, 2, 3]) == tuple(1, 3));
 }
 
-@safe unittest //12569
+// https://issues.dlang.org/show_bug.cgi?id=12569
+@safe unittest
 {
     import std.algorithm.comparison : max, min;
     import std.typecons : tuple;
@@ -4014,12 +4075,13 @@ The number of seeds must be correspondingly increased.
     static assert(!is(typeof(reduce!(min, max)(tuple(c), "hello"))));
     //"Seed (dchar, dchar, dchar) does not have the correct amount of fields (should be 2)"
     static assert(!is(typeof(reduce!(min, max)(tuple(c, c, c), "hello"))));
-    //"Incompatable function/seed/element: all(alias pred = "a")/int/dchar"
+    //"Incompatible function/seed/element: all(alias pred = "a")/int/dchar"
     static assert(!is(typeof(reduce!all(1, "hello"))));
     static assert(!is(typeof(reduce!(all, all)(tuple(1, 1), "hello"))));
 }
 
-@safe unittest //13304
+// https://issues.dlang.org/show_bug.cgi?id=13304
+@safe unittest
 {
     int[] data;
     static assert(is(typeof(reduce!((a, b) => a + b)(data))));
@@ -4491,7 +4553,8 @@ The number of seeds must be correspondingly increased.
     assert(minmaxElement([1, 2, 3]).equal([tuple(1, 1), tuple(1, 2), tuple(1, 3)]));
 }
 
-@safe unittest //12569
+// https://issues.dlang.org/show_bug.cgi?id=12569
+@safe unittest
 {
     import std.algorithm.comparison : equal, max, min;
     import std.typecons : tuple;
@@ -4509,12 +4572,13 @@ The number of seeds must be correspondingly increased.
     static assert(!__traits(compiles, cumulativeFold!(min, max)("hello", tuple(c))));
     //"Seed (dchar, dchar, dchar) does not have the correct amount of fields (should be 2)"
     static assert(!__traits(compiles, cumulativeFold!(min, max)("hello", tuple(c, c, c))));
-    //"Incompatable function/seed/element: all(alias pred = "a")/int/dchar"
+    //"Incompatible function/seed/element: all(alias pred = "a")/int/dchar"
     static assert(!__traits(compiles, cumulativeFold!all("hello", 1)));
     static assert(!__traits(compiles, cumulativeFold!(all, all)("hello", tuple(1, 1))));
 }
 
-@safe unittest //13304
+// https://issues.dlang.org/show_bug.cgi?id=13304
+@safe unittest
 {
     int[] data;
     assert(data.cumulativeFold!((a, b) => a + b).empty);
@@ -4914,7 +4978,9 @@ if (is(typeof(binaryFun!pred(r.front, s)) : bool)
     assert(split.front == "b ");
     assert(split.back == "r ");
 
-    foreach (DummyType; AllDummyRanges) {  // Bug 4408
+    // https://issues.dlang.org/show_bug.cgi?id=4408
+    foreach (DummyType; AllDummyRanges)
+    {
         static if (isRandomAccessRange!DummyType)
         {
             static assert(isBidirectionalRange!DummyType);
@@ -4941,7 +5007,8 @@ if (is(typeof(binaryFun!pred(r.front, s)) : bool)
     assert(s.empty);
 }
 
-@safe unittest // issue 18470
+// https://issues.dlang.org/show_bug.cgi?id=18470
+@safe unittest
 {
     import std.algorithm.comparison : equal;
 
@@ -4949,7 +5016,8 @@ if (is(typeof(binaryFun!pred(r.front, s)) : bool)
     assert(w.splitter!((a, b) => a.front() == b)(1).equal([[[0]], [[2]]]));
 }
 
-@safe unittest // issue 18470
+// https://issues.dlang.org/show_bug.cgi?id=18470
+@safe unittest
 {
     import std.algorithm.comparison : equal;
     import std.ascii : toLower;
@@ -5115,11 +5183,11 @@ if (is(typeof(binaryFun!pred(r.front, s.front)) : bool)
     assert(equal(sp6, ["", ""][]));
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=10773
 @safe unittest
 {
     import std.algorithm.comparison : equal;
 
-    // Issue 10773
     auto s = splitter("abc", "");
     assert(s.equal(["a", "b", "c"]));
 }
@@ -5360,7 +5428,7 @@ private struct SplitterResult(alias isTerminator, Range)
     import std.algorithm.comparison : equal;
     import std.uni : isWhite;
 
-    //@@@6791@@@
+    // https://issues.dlang.org/show_bug.cgi?id=6791
     assert(equal(
         splitter("là dove terminava quella valle"),
         ["là", "dove", "terminava", "quella", "valle"]
@@ -5372,11 +5440,13 @@ private struct SplitterResult(alias isTerminator, Range)
     assert(equal(splitter!"a=='本'"("日本語"), ["日", "語"]));
 }
 
-pure @safe unittest // issue 18657
+// https://issues.dlang.org/show_bug.cgi?id=18657
+pure @safe unittest
 {
     import std.algorithm.comparison : equal;
     import std.range : refRange;
-    auto r = refRange(&["foobar"][0]).splitter!(c => c == 'b');
+    string s = "foobar";
+    auto r = refRange(&s).splitter!(c => c == 'b');
     assert(equal!equal(r.save, ["foo", "ar"]));
     assert(equal!equal(r.save, ["foo", "ar"]));
 }
@@ -5416,8 +5486,8 @@ if (isSomeString!Range ||
             import std.uni : isWhite;
             import std.traits : Unqual;
 
-            static if (is(Unqual!(ElementEncodingType!Range) == wchar) &&
-                       is(Unqual!(ElementType!Range) == dchar))
+            static if (is(immutable ElementEncodingType!Range == immutable wchar) &&
+                       is(immutable ElementType!Range == immutable dchar))
             {
                 // all unicode whitespace characters fit into a wchar. However,
                 // this range is a wchar array, so we will treat it like a
@@ -5430,8 +5500,8 @@ if (isSomeString!Range ||
                         break;
                     }
             }
-            else static if (is(Unqual!(ElementType!Range) == dchar) ||
-                            is(Unqual!(ElementType!Range) == wchar))
+            else static if (is(immutable ElementType!Range == immutable dchar) ||
+                            is(immutable ElementType!Range == immutable wchar))
             {
                 // dchar or wchar range, we can just use find.
                 auto r = find!(isWhite)(_s.save);
@@ -5597,9 +5667,9 @@ if (isSomeString!Range ||
     assert(dictionary["last".byCodeUnit]== 4);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=19238
 @safe pure unittest
 {
-    // issue 19238
     import std.utf : byCodeUnit;
     import std.algorithm.comparison : equal;
     auto range = "hello    world".byCodeUnit.splitter;
@@ -6310,7 +6380,7 @@ if (isInputRange!R && Substs.length >= 2 && !is(CommonType!(Substs) == void))
     }}
 }
 
-// issue 19207
+// https://issues.dlang.org/show_bug.cgi?id=19207
 @safe pure nothrow unittest
 {
     import std.algorithm.comparison : equal;
@@ -6374,7 +6444,9 @@ $(DDSUBLINK spec/type,integer-promotions, integral promotion)).
 
 A seed may be passed to `sum`. Not only will this seed be used as an initial
 value, but its type will override all the above, and determine the algorithm
-and precision used for summation.
+and precision used for summation. If a seed is not passed, one is created with
+the value of `typeof(r.front + r.front)(0)`, or `typeof(r.front + r.front).zero`
+if no constructor exists that takes an int.
 
 Note that these specialized summing algorithms execute more primitive operations
 than vanilla summation. Therefore, if in certain cases maximum speed is required
@@ -6396,7 +6468,15 @@ if (isInputRange!R && !isInfinite!R && is(typeof(r.front + r.front)))
         alias Seed = typeof(E.init  + 0.0); //biggest of double/real
     else
         alias Seed = typeof(r.front + r.front);
-    return sum(r, Unqual!Seed(0));
+    static if (is(typeof(Unqual!Seed(0))))
+        enum seedValue = Unqual!Seed(0);
+    else static if (is(typeof({ Unqual!Seed tmp = Seed.zero; })))
+        enum Unqual!Seed seedValue = Seed.zero;
+    else
+        static assert(false,
+            "Could not initiate an initial value for " ~ (Unqual!Seed).stringof
+            ~ ". Please supply an initial value manually.");
+    return sum(r, seedValue);
 }
 /// ditto
 auto sum(R, E)(R r, E seed)
@@ -6607,7 +6687,8 @@ private auto sumKahan(Result, R)(Result result, R r)
     assert(sum(SList!double(1, 2, 3, 4)[]) == 10);
 }
 
-@safe pure nothrow unittest // 12434
+// https://issues.dlang.org/show_bug.cgi?id=12434
+@safe pure nothrow unittest
 {
     immutable a = [10, 20];
     auto s1 = sum(a);
@@ -6634,6 +6715,13 @@ private auto sumKahan(Result, R)(Result result, R r)
     import std.range;
     foreach (n; iota(50))
         assert(repeat(1.0, n).sum == n);
+}
+
+// Issue 19525
+@safe unittest
+{
+    import std.datetime : Duration, minutes;
+    assert([1.minutes].sum() == 1.minutes);
 }
 
 /**
@@ -6909,7 +6997,8 @@ private struct UniqResult(alias pred, Range)
     }
 }
 
-@safe unittest // https://issues.dlang.org/show_bug.cgi?id=17264
+// https://issues.dlang.org/show_bug.cgi?id=17264
+@safe unittest
 {
     import std.algorithm.comparison : equal;
 

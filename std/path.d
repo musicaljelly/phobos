@@ -101,7 +101,16 @@ static import std.meta;
 import std.range.primitives;
 import std.traits;
 
-version (unittest)
+version (OSX)
+    version = Darwin;
+else version (iOS)
+    version = Darwin;
+else version (TVOS)
+    version = Darwin;
+else version (WatchOS)
+    version = Darwin;
+
+version (StdUnittest)
 {
 private:
     struct TestAliasedString
@@ -343,7 +352,7 @@ enum CaseSensitive : bool
 
     /** The default (or most common) setting for the current platform.
         That is, `no` on Windows and Mac OS X, and `yes` on all
-        POSIX systems except OS X (Linux, *BSD, etc.).
+        POSIX systems except Darwin (Linux, *BSD, etc.).
     */
     osDefault = osDefaultCaseSensitivity
 }
@@ -360,9 +369,9 @@ enum CaseSensitive : bool
         assert(relativePath!(CaseSensitive.no)(`c:\FOO\bar`, `c:\foo\baz`) == `..\bar`);
 }
 
-version (Windows)    private enum osDefaultCaseSensitivity = false;
-else version (OSX)   private enum osDefaultCaseSensitivity = false;
-else version (Posix) private enum osDefaultCaseSensitivity = true;
+version (Windows)     private enum osDefaultCaseSensitivity = false;
+else version (Darwin) private enum osDefaultCaseSensitivity = false;
+else version (Posix)  private enum osDefaultCaseSensitivity = true;
 else static assert(0);
 
 /**
@@ -533,14 +542,15 @@ if (isRandomAccessRange!R && hasSlicing!R && isSomeChar!(ElementType!R) || isNar
     return p2[lastSeparator(p2)+1 .. p2.length];
 }
 
-/** Returns the parent directory of path. On Windows, this
-    includes the drive letter if present.
+/** Returns the parent directory of `path`. On Windows, this
+    includes the drive letter if present. If `path` is a relative path and
+    the parent directory is the current working directory, returns `"."`.
 
     Params:
         path = A path name.
 
     Returns:
-        A slice of `path` or ".".
+        A slice of `path` or `"."`.
 
     Standards:
     This function complies with
@@ -1170,8 +1180,8 @@ private auto _stripExtension(R)(R path)
     See_Also:
         $(LREF withExtension) which does not allocate and returns a lazy range.
 */
-immutable(Unqual!C1)[] setExtension(C1, C2)(in C1[] path, in C2[] ext)
-if (isSomeChar!C1 && !is(C1 == immutable) && is(Unqual!C1 == Unqual!C2))
+immutable(C1)[] setExtension(C1, C2)(in C1[] path, in C2[] ext)
+if (isSomeChar!C1 && !is(C1 == immutable) && is(immutable C1 == immutable C2))
 {
     try
     {
@@ -1186,7 +1196,7 @@ if (isSomeChar!C1 && !is(C1 == immutable) && is(Unqual!C1 == Unqual!C2))
 
 ///ditto
 immutable(C1)[] setExtension(C1, C2)(immutable(C1)[] path, const(C2)[] ext)
-if (isSomeChar!C1 && is(Unqual!C1 == Unqual!C2))
+if (isSomeChar!C1 && is(immutable C1 == immutable C2))
 {
     if (ext.length == 0)
         return stripExtension(path);
@@ -1228,7 +1238,7 @@ if (isSomeChar!C1 && is(Unqual!C1 == Unqual!C2))
     static assert(setExtension("file"w.dup, "ext"w) == "file.ext");
     static assert(setExtension("file.old"d.dup, "new"d) == "file.new");
 
-    // Issue 10601
+    // https://issues.dlang.org/show_bug.cgi?id=10601
     assert(setExtension("file", "") == "file");
     assert(setExtension("file.ext", "") == "file");
 }
@@ -1310,8 +1320,8 @@ private auto _withExtension(R, C)(R path, C[] ext)
     This function always allocates a new string, except in the case when
     path is immutable and already has an extension.
 */
-immutable(Unqual!C1)[] defaultExtension(C1, C2)(in C1[] path, in C2[] ext)
-if (isSomeChar!C1 && is(Unqual!C1 == Unqual!C2))
+immutable(C1)[] defaultExtension(C1, C2)(in C1[] path, in C2[] ext)
+if (isSomeChar!C1 && is(immutable C1 == immutable C2))
 {
     import std.conv : to;
     return withDefaultExtension(path, ext).to!(typeof(return));
@@ -3334,7 +3344,7 @@ bool globMatch(CaseSensitive cs = CaseSensitive.osDefault, C, Range)
     @safe pure nothrow
 if (isForwardRange!Range && !isInfinite!Range &&
     isSomeChar!(ElementEncodingType!Range) && !isConvertibleToString!Range &&
-    isSomeChar!C && is(Unqual!C == Unqual!(ElementEncodingType!Range)))
+    isSomeChar!C && is(immutable C == immutable ElementEncodingType!Range))
 in
 {
     // Verify that pattern[] is valid
@@ -3962,17 +3972,27 @@ string expandTilde(string inputPath) @safe nothrow
             // Search end of C string
             size_t end = strlen(c_path);
 
-            // Remove trailing path separator, if any
-            if (end && isDirSeparator(c_path[end - 1]))
-                end--;
+            const cPathEndsWithDirSep = end && isDirSeparator(c_path[end - 1]);
 
             string cp;
             if (char_pos < path.length)
+            {
+                // Remove trailing path separator, if any (with special care for root /)
+                if (cPathEndsWithDirSep && (end > 1 || isDirSeparator(path[char_pos])))
+                    end--;
+
                 // Append something from path
                 cp = assumeUnique(c_path[0 .. end] ~ path[char_pos .. $]);
+            }
             else
+            {
+                // Remove trailing path separator, if any (except for root /)
+                if (cPathEndsWithDirSep && end > 1)
+                    end--;
+
                 // Create our own copy, as lifetime of c_path is undocumented
                 cp = c_path[0 .. end].idup;
+            }
 
             return cp;
         }
@@ -4030,7 +4050,7 @@ string expandTilde(string inputPath) @safe nothrow
                 assert(last_char > 1);
 
                 // Reserve C memory for the getpwnam_r() function.
-                version (unittest)
+                version (StdUnittest)
                     uint extra_memory_size = 2;
                 else
                     uint extra_memory_size = 5 * 1024;
@@ -4115,7 +4135,10 @@ string expandTilde(string inputPath) @safe nothrow
 {
     version (Posix)
     {
-        import std.process : executeShell, environment;
+        static if (__traits(compiles, { import std.process : executeShell; }))
+            import std.process : executeShell;
+
+        import std.process : environment;
         import std.string : strip;
 
         // Retrieve the current home variable.
@@ -4136,22 +4159,31 @@ string expandTilde(string inputPath) @safe nothrow
         assert(expandTilde("~/") == "dmd/test/");
         assert(expandTilde("~") == "dmd/test");
 
+        // The same, but with a variable set to root.
+        environment["HOME"] = "/";
+        assert(expandTilde("~/") == "/");
+        assert(expandTilde("~") == "/");
+
         // Recover original HOME variable before continuing.
         if (oldHome !is null) environment["HOME"] = oldHome;
         else environment.remove("HOME");
 
-        immutable tildeUser = "~" ~ environment.get("USER");
-        immutable path = executeShell("echo " ~ tildeUser).output.strip();
-        immutable expTildeUser = expandTilde(tildeUser);
-        assert(expTildeUser == path, expTildeUser);
-        immutable expTildeUserSlash = expandTilde(tildeUser ~ "/");
-        assert(expTildeUserSlash == path ~ "/", expTildeUserSlash);
+        static if (is(typeof(executeShell)))
+        {
+            immutable tildeUser = "~" ~ environment.get("USER");
+            immutable path = executeShell("echo " ~ tildeUser).output.strip();
+            immutable expTildeUser = expandTilde(tildeUser);
+            assert(expTildeUser == path, expTildeUser);
+            immutable expTildeUserSlash = expandTilde(tildeUser ~ "/");
+            immutable pathSlash = path[$-1] == '/' ? path : path ~ "/";
+            assert(expTildeUserSlash == pathSlash, expTildeUserSlash);
+        }
 
         assert(expandTilde("~Idontexist/hey") == "~Idontexist/hey");
     }
 }
 
-version (unittest)
+version (StdUnittest)
 {
 private:
     /* Define a mock RandomAccessRange to use for unittesting.

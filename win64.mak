@@ -44,13 +44,13 @@ DRUNTIMELIB=$(DRUNTIME)/lib/druntime$(MODEL).lib
 
 ## Flags for dmd D compiler
 
-DFLAGS=-conf= -m$(MODEL) -O -release -w -de -dip25 -I$(DRUNTIME)\import
+DFLAGS=-conf= -m$(MODEL) -O -release -w -de -preview=dip1000 -preview=dtorfields -transition=complex -I$(DRUNTIME)\import
 #DFLAGS=-m$(MODEL) -unittest -g
 #DFLAGS=-m$(MODEL) -unittest -cov -g
 
 ## Flags for compiling unittests
 
-UDFLAGS=-conf= -g -m$(MODEL) -O -w -dip25 -I$(DRUNTIME)\import -unittest
+UDFLAGS=-conf= -g -m$(MODEL) -O -w -preview=dip1000 -transition=complex -I$(DRUNTIME)\import -unittest -version=StdUnittest -version=CoreUnittest
 
 ## C compiler, linker, librarian
 
@@ -124,7 +124,6 @@ SRC_STD_3a= \
 	std\math.d
 
 SRC_STD_3b= \
-	std\uni.d \
 	std\base64.d \
 	std\ascii.d \
 	std\demangle.d \
@@ -278,7 +277,9 @@ SRC_STD_INTERNAL_WINDOWS= \
 	std\internal\windows\advapi32.d
 
 SRC_STD_EXP= \
-	std\experimental\all.d std\experimental\checkedint.d std\experimental\typecons.d
+	std\experimental\checkedint.d std\experimental\typecons.d
+
+SRC_STD_UNI = std\uni\package.d
 
 SRC_STD_EXP_ALLOC_BB= \
 	std\experimental\allocator\building_blocks\affix_allocator.d \
@@ -343,6 +344,7 @@ SRC_TO_COMPILE= \
 	$(SRC_STD_INTERNAL_DIGEST) \
 	$(SRC_STD_INTERNAL_MATH) \
 	$(SRC_STD_INTERNAL_WINDOWS) \
+	$(SRC_STD_UNI) \
 	$(SRC_STD_EXP) \
 	$(SRC_STD_EXP_ALLOC) \
 	$(SRC_STD_EXP_LOGGER) \
@@ -505,11 +507,13 @@ install: phobos.zip
 	+rd/s/q $(DIR)\src\phobos
 	unzip -o phobos.zip -d $(DIR)\src\phobos
 
-auto-tester-build: targets
+auto-tester-build:
+	echo "Windows builds have been disabled on auto-tester"
 
 JOBS=$(NUMBER_OF_PROCESSORS)
 GMAKE=gmake
 
 auto-tester-test:
-	"$(GMAKE)" -j$(JOBS) -f posix.mak unittest BUILD=release DMD="$(DMD)" OS=win$(MODEL) \
-	CUSTOM_DRUNTIME=1 PIC=0 MODEL=$(MODEL) DRUNTIME=$(DRUNTIMELIB) CC=$(CC)
+	echo "Windows builds have been disabled on auto-tester"
+	#"$(GMAKE)" -j$(JOBS) -f posix.mak unittest BUILD=release DMD="$(DMD)" OS=win$(MODEL) \
+	#CUSTOM_DRUNTIME=1 PIC=0 MODEL=$(MODEL) DRUNTIME=$(DRUNTIMELIB) CC=$(CC)

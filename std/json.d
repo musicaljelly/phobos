@@ -95,18 +95,22 @@ enum JSONType : byte
     object,   /// ditto
     true_,    /// ditto
     false_,   /// ditto
-    deprecated("Use .null_")    NULL = null_,
-    deprecated("Use .string")   STRING = string,
-    deprecated("Use .integer")  INTEGER = integer,
-    deprecated("Use .uinteger") UINTEGER = uinteger,
-    deprecated("Use .float_")   FLOAT = float_,
-    deprecated("Use .array")    ARRAY = array,
-    deprecated("Use .object")   OBJECT = object,
-    deprecated("Use .true_")    TRUE = true_,
-    deprecated("Use .false_")   FALSE = false_,
+    // FIXME: Find some way to deprecate the enum members below, which does NOT
+    // create lots of spam-like deprecation warnings, which can't be fixed
+    // by the user. See discussion on this issue at
+    // https://forum.dlang.org/post/feudrhtxkaxxscwhhhff@forum.dlang.org
+    /* deprecated("Use .null_")    */ NULL = null_,
+    /* deprecated("Use .string")   */ STRING = string,
+    /* deprecated("Use .integer")  */ INTEGER = integer,
+    /* deprecated("Use .uinteger") */ UINTEGER = uinteger,
+    /* deprecated("Use .float_")   */ FLOAT = float_,
+    /* deprecated("Use .array")    */ ARRAY = array,
+    /* deprecated("Use .object")   */ OBJECT = object,
+    /* deprecated("Use .true_")    */ TRUE = true_,
+    /* deprecated("Use .false_")   */ FALSE = false_,
 }
 
-deprecated("Use JSONType") alias JSON_TYPE = JSONType;
+deprecated("Use JSONType and the new enum member names") alias JSON_TYPE = JSONType;
 
 /**
 JSON value node
@@ -359,7 +363,91 @@ struct JSONValue
         return type == JSONType.null_;
     }
 
-    private void assign(T)(T arg) @safe
+    /***
+     * Generic type value getter
+     * A convenience getter that returns this `JSONValue` as the specified D type.
+     * Note: only numeric, `bool`, `string`, `JSONValue[string]` and `JSONValue[]` types are accepted
+     * Throws: `JSONException` if `T` cannot hold the contents of this `JSONValue`
+     */
+    @property inout(T) get(T)() inout const pure @safe
+    {
+        static if (is(immutable T == immutable string))
+        {
+            return str;
+        }
+        else static if (is(immutable T == immutable bool))
+        {
+            return boolean;
+        }
+        else static if (isFloatingPoint!T)
+        {
+            switch (type)
+            {
+            case JSONType.float_:
+                return cast(T) floating;
+            case JSONType.uinteger:
+                return cast(T) uinteger;
+            case JSONType.integer:
+                return cast(T) integer;
+            default:
+                throw new JSONException("JSONValue is not a number type");
+            }
+        }
+        else static if (__traits(isUnsigned, T))
+        {
+            return cast(T) uinteger;
+        }
+        else static if (isSigned!T)
+        {
+            return cast(T) integer;
+        }
+        else
+        {
+            static assert(false, "Unsupported type");
+        }
+    }
+    // This specialization is needed because arrayNoRef requires inout
+    @property inout(T) get(T : JSONValue[])() inout pure @trusted /// ditto
+    {
+        return arrayNoRef;
+    }
+    /// ditto
+    @property inout(T) get(T : JSONValue[string])() inout pure @trusted
+    {
+        return object;
+    }
+    ///
+    @safe unittest
+    {
+        import std.exception;
+        string s =
+        `{
+            "a": 123,
+            "b": 3.1415,
+            "c": "text",
+            "d": true,
+            "e": [1, 2, 3],
+            "f": { "a": 1 }
+         }`;
+
+        struct a { }
+
+        immutable json = parseJSON(s);
+        assert(json["a"].get!double == 123.0);
+        assert(json["a"].get!int == 123);
+        assert(json["b"].get!double == 3.1415);
+        assertThrown(json["b"].get!int);
+        assert(json["c"].get!string == "text");
+        assert(json["d"].get!bool == true);
+        assertNotThrown(json["e"].get!(JSONValue[]));
+        assertNotThrown(json["f"].get!(JSONValue[string]));
+        static assert(!__traits(compiles, json["a"].get!a));
+        assertThrown(json["e"].get!float);
+        assertThrown(json["d"].get!(JSONValue[string]));
+        assertThrown(json["f"].get!(JSONValue[]));
+    }
+
+    private void assign(T)(T arg)
     {
         static if (is(T : typeof(null)))
         {
@@ -371,7 +459,8 @@ struct JSONValue
             string t = arg;
             () @trusted { store.str = t; }();
         }
-        else static if (isSomeString!T) // issue 15884
+        // https://issues.dlang.org/show_bug.cgi?id=15884
+        else static if (isSomeString!T)
         {
             type_tag = JSONType.string;
             // FIXME: std.Array.Array(Range) is not deduced as 'pure'
@@ -554,7 +643,7 @@ struct JSONValue
      * Throws: `JSONException` if `type` is not `JSONType.object`
      * or `JSONType.null_`.
      */
-    void opIndexAssign(T)(auto ref T value, string key) pure
+    void opIndexAssign(T)(auto ref T value, string key)
     {
         enforce!JSONException(type == JSONType.object || type == JSONType.null_,
                                 "JSONValue must be object or null");
@@ -575,7 +664,7 @@ struct JSONValue
             assert( j["language"].str == "Perl" );
     }
 
-    void opIndexAssign(T)(T arg, size_t i) pure
+    void opIndexAssign(T)(T arg, size_t i)
     {
         auto a = this.arrayNoRef;
         enforce!JSONException(i < a.length,
@@ -591,7 +680,7 @@ struct JSONValue
             assert( j[1].str == "D" );
     }
 
-    JSONValue opBinary(string op : "~", T)(T arg) @safe
+    JSONValue opBinary(string op : "~", T)(T arg)
     {
         auto a = this.arrayNoRef;
         static if (isArray!T)
@@ -608,7 +697,7 @@ struct JSONValue
         }
     }
 
-    void opOpAssign(string op : "~", T)(T arg) @safe
+    void opOpAssign(string op : "~", T)(T arg)
     {
         auto a = this.arrayNoRef;
         static if (isArray!T)
@@ -761,6 +850,12 @@ struct JSONValue
         return toJSON(this, false, options);
     }
 
+    ///
+    void toString(Out)(Out sink, in JSONOptions options = JSONOptions.none) const
+    {
+        toJSON(sink, this, false, options);
+    }
+
     /***
      * Implicitly calls `toJSON` on this JSONValue, like `toString`, but
      * also passes $(I true) as $(I pretty) argument.
@@ -770,6 +865,41 @@ struct JSONValue
     string toPrettyString(in JSONOptions options = JSONOptions.none) const @safe
     {
         return toJSON(this, true, options);
+    }
+
+    ///
+    void toPrettyString(Out)(Out sink, in JSONOptions options = JSONOptions.none) const
+    {
+        toJSON(sink, this, true, options);
+    }
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=20874
+@system unittest
+{
+    static struct MyCustomType
+    {
+        public string toString () const @system { return null; }
+        alias toString this;
+    }
+
+    static struct B
+    {
+        public JSONValue asJSON() const @system { return JSONValue.init; }
+        alias asJSON this;
+    }
+
+    if (false) // Just checking attributes
+    {
+        JSONValue json;
+        MyCustomType ilovedlang;
+        json = ilovedlang;
+        json["foo"] = ilovedlang;
+        auto s = ilovedlang in json;
+
+        B b;
+        json ~= b;
+        json ~ b;
     }
 }
 
@@ -1105,8 +1235,7 @@ if (isInputRange!T && !isInfinite!T && isSomeChar!(ElementEncodingType!T))
                     break;
                 }
 
-                value.type_tag = JSONType.string;
-                value.store.str = str;
+                value.assign(str);
                 break;
 
             case '0': .. case '9':
@@ -1173,12 +1302,25 @@ if (isInputRange!T && !isInfinite!T && isSomeChar!(ElementEncodingType!T))
                 else
                 {
                     if (isNegative)
+                    {
                         value.store.integer = parse!long(data);
+                        value.type_tag = JSONType.integer;
+                    }
                     else
-                        value.store.uinteger = parse!ulong(data);
-
-                    value.type_tag = !isNegative && value.store.uinteger & (1UL << 63) ?
-                        JSONType.uinteger : JSONType.integer;
+                    {
+                        // only set the correct union member to not confuse CTFE
+                        ulong u = parse!ulong(data);
+                        if (u & (1UL << 63))
+                        {
+                            value.store.uinteger = u;
+                            value.type_tag = JSONType.uinteger;
+                        }
+                        else
+                        {
+                            value.store.integer = u;
+                            value.type_tag = JSONType.integer;
+                        }
+                    }
                 }
                 break;
 
@@ -1265,6 +1407,12 @@ if (isInputRange!T && !isInfinite!T && isSomeChar!(ElementEncodingType!T))
     assert(json["key1"]["key2"].integer == 1);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=20527
+@safe unittest
+{
+    static assert(parseJSON(`{"a" : 2}`)["a"].integer == 2);
+}
+
 /**
 Parses a serialized string and returns a tree of JSON values.
 Throws: $(LREF JSONException) if the depth exceeds the max depth.
@@ -1290,8 +1438,19 @@ Set the $(LREF JSONOptions.specialFloatLiterals) flag is set in `options` to enc
 string toJSON(const ref JSONValue root, in bool pretty = false, in JSONOptions options = JSONOptions.none) @safe
 {
     auto json = appender!string();
+    toJSON(json, root, pretty, options);
+    return json.data;
+}
 
-    void toStringImpl(Char)(string str) @safe
+///
+void toJSON(Out)(
+    auto ref Out json,
+    const ref JSONValue root,
+    in bool pretty = false,
+    in JSONOptions options = JSONOptions.none)
+if (isOutputRange!(Out,char))
+{
+    void toStringImpl(Char)(string str)
     {
         json.put('"');
 
@@ -1352,7 +1511,7 @@ string toJSON(const ref JSONValue root, in bool pretty = false, in JSONOptions o
         json.put('"');
     }
 
-    void toString(string str) @safe
+    void toString(string str)
     {
         // Avoid UTF decoding when possible, as it is unnecessary when
         // processing JSON.
@@ -1362,7 +1521,19 @@ string toJSON(const ref JSONValue root, in bool pretty = false, in JSONOptions o
             toStringImpl!char(str);
     }
 
-    void toValue(ref in JSONValue value, ulong indentLevel) @safe
+    // recursive @safe inference is broken here
+    // workaround: if json.put is @safe, we should be too,
+    // so annotate the recursion as @safe manually
+    static if (isSafe!({ json.put(""); }))
+    {
+        void delegate(ref const JSONValue, ulong) @safe toValue;
+    }
+    else
+    {
+        void delegate(ref const JSONValue, ulong) @system toValue;
+    }
+
+    void toValueImpl(ref const JSONValue value, ulong indentLevel)
     {
         void putTabs(ulong additionalIndent = 0)
         {
@@ -1412,7 +1583,7 @@ string toJSON(const ref JSONValue root, in bool pretty = false, in JSONOptions o
                     }
 
                     import std.algorithm.sorting : sort;
-                    // @@@BUG@@@ 14439
+                    // https://issues.dlang.org/show_bug.cgi?id=14439
                     // auto names = obj.keys;  // aa.keys can't be called in @safe code
                     auto names = new string[obj.length];
                     size_t i = 0;
@@ -1518,11 +1689,13 @@ string toJSON(const ref JSONValue root, in bool pretty = false, in JSONOptions o
         }
     }
 
+    toValue = &toValueImpl;
+
     toValue(root, 0);
-    return json.data;
 }
 
-@safe unittest // bugzilla 12897
+ // https://issues.dlang.org/show_bug.cgi?id=12897
+@safe unittest
 {
     JSONValue jv0 = JSONValue("test测试");
     assert(toJSON(jv0, false, JSONOptions.escapeNonAsciiChars) == `"test\u6D4B\u8BD5"`);
@@ -1534,6 +1707,16 @@ string toJSON(const ref JSONValue root, in bool pretty = false, in JSONOptions o
     JSONValue jv11 = JSONValue("\u00E9t\u00E9");
     assert(toJSON(jv11, false, JSONOptions.none) == `"été"`);
     assert(toJSON(jv1, false, JSONOptions.none) == `"été"`);
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=20511
+@system unittest
+{
+    import std.format : formattedWrite;
+    import std.range : nullSink, outputRangeObject;
+
+    outputRangeObject!(const(char)[])(nullSink)
+        .formattedWrite!"%s"(JSONValue.init);
 }
 
 /**
@@ -1633,10 +1816,9 @@ class JSONException : Exception
     assert(jv3.str == "\u001C");
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=11504
 @system unittest
 {
-    // Bugzilla 11504
-
     JSONValue jv = 1;
     assert(jv.type == JSONType.integer);
 
@@ -1808,7 +1990,7 @@ class JSONException : Exception
 
 @system pure unittest
 {
-    // Bugzilla 12969
+    // https://issues.dlang.org/show_bug.cgi?id=12969
 
     JSONValue jv;
     jv["int"] = 123;
@@ -1908,7 +2090,8 @@ pure nothrow @safe @nogc unittest
     assert(testVal.isNull);
 }
 
-pure nothrow @safe unittest // issue 15884
+// https://issues.dlang.org/show_bug.cgi?id=15884
+pure nothrow @safe unittest
 {
     import std.typecons;
     void Test(C)() {
@@ -1923,7 +2106,8 @@ pure nothrow @safe unittest // issue 15884
     Test!dchar();
 }
 
-@safe unittest // issue 15885
+// https://issues.dlang.org/show_bug.cgi?id=15885
+@safe unittest
 {
     enum bool realInDoublePrecision = real.mant_dig == double.mant_dig;
 
@@ -1957,34 +2141,39 @@ pure nothrow @safe unittest // issue 15884
     assert(test(3*minSub));
 }
 
-@safe unittest // issue 17555
+// https://issues.dlang.org/show_bug.cgi?id=17555
+@safe unittest
 {
     import std.exception : assertThrown;
 
     assertThrown!JSONException(parseJSON("\"a\nb\""));
 }
 
-@safe unittest // issue 17556
+// https://issues.dlang.org/show_bug.cgi?id=17556
+@safe unittest
 {
     auto v = JSONValue("\U0001D11E");
     auto j = toJSON(v, false, JSONOptions.escapeNonAsciiChars);
     assert(j == `"\uD834\uDD1E"`);
 }
 
-@safe unittest // issue 5904
+// https://issues.dlang.org/show_bug.cgi?id=5904
+@safe unittest
 {
     string s = `"\uD834\uDD1E"`;
     auto j = parseJSON(s);
     assert(j.str == "\U0001D11E");
 }
 
-@safe unittest // issue 17557
+// https://issues.dlang.org/show_bug.cgi?id=17557
+@safe unittest
 {
     assert(parseJSON("\"\xFF\"").str == "\xFF");
     assert(parseJSON("\"\U0001D11E\"").str == "\U0001D11E");
 }
 
-@safe unittest // issue 17553
+// https://issues.dlang.org/show_bug.cgi?id=17553
+@safe unittest
 {
     auto v = JSONValue("\xFF");
     assert(toJSON(v) == "\"\xFF\"");
@@ -1997,7 +2186,8 @@ pure nothrow @safe unittest // issue 15884
     assert(parseJSON("\"\U0001D11E\"".byChar).str == "\U0001D11E");
 }
 
-@safe unittest // JSONOptions.doNotEscapeSlashes (issue 17587)
+// JSONOptions.doNotEscapeSlashes (https://issues.dlang.org/show_bug.cgi?id=17587)
+@safe unittest
 {
     assert(parseJSON(`"/"`).toString == `"\/"`);
     assert(parseJSON(`"\/"`).toString == `"\/"`);
@@ -2005,7 +2195,8 @@ pure nothrow @safe unittest // issue 15884
     assert(parseJSON(`"\/"`).toString(JSONOptions.doNotEscapeSlashes) == `"/"`);
 }
 
-@safe unittest // JSONOptions.strictParsing (issue 16639)
+// JSONOptions.strictParsing (https://issues.dlang.org/show_bug.cgi?id=16639)
+@safe unittest
 {
     import std.exception : assertThrown;
 
@@ -2100,4 +2291,40 @@ pure nothrow @safe unittest // issue 15884
     assert(t.empty);
 
     assertThrown(parseJSON(s, -1, JSONOptions.strictParsing));
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=20330
+@safe unittest
+{
+    import std.array : appender;
+
+    string s = `{"a":[1,2,3]}`;
+    JSONValue j = parseJSON(s);
+
+    auto app = appender!string();
+    j.toString(app);
+
+    assert(app.data == s, app.data);
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=20330
+@safe unittest
+{
+    import std.array : appender;
+    import std.format : formattedWrite;
+
+    string s =
+`{
+    "a": [
+        1,
+        2,
+        3
+    ]
+}`;
+    JSONValue j = parseJSON(s);
+
+    auto app = appender!string();
+    j.toPrettyString(app);
+
+    assert(app.data == s, app.data);
 }

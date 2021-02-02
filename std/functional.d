@@ -8,6 +8,7 @@ functions are helpful when constructing predicates for the algorithms in
 $(MREF std, algorithm) or $(MREF std, range).
 
 $(SCRIPT inhibitQuickIndex = 1;)
+$(DIVC quickindex,
 $(BOOKTABLE ,
 $(TR $(TH Function Name) $(TH Description)
 )
@@ -36,6 +37,10 @@ $(TR $(TH Function Name) $(TH Description)
         $(TD Creates a function that binds the first argument of a given function
         to a given value.
     ))
+    $(TR $(TD $(LREF curry))
+        $(TD Converts a multi-argument function into a series of single-argument
+        functions.  f(x, y) == curry(f)(x)(y)
+    ))
     $(TR $(TD $(LREF reverseArgs))
         $(TD Predicate that reverses the order of its arguments.
     ))
@@ -46,7 +51,7 @@ $(TR $(TH Function Name) $(TH Description)
         $(TD Create a unary or binary function from a string. Most often
         used when defining algorithms on ranges.
     ))
-)
+))
 
 Copyright: Copyright Andrei Alexandrescu 2008 - 2009.
 License:   $(HTTP boost.org/LICENSE_1_0.txt, Boost License 1.0).
@@ -123,7 +128,7 @@ template unaryFun(alias fun, string parmName = "a")
     }
     else static if (needOpCallAlias!fun)
     {
-        // Issue 9906
+        // https://issues.dlang.org/show_bug.cgi?id=9906
         alias unaryFun = fun.opCall;
     }
     else
@@ -154,7 +159,7 @@ template unaryFun(alias fun, string parmName = "a")
     int num = 41;
     assert(unaryFun!"a + 1"(num) == 42);
 
-    // Issue 9906
+    // https://issues.dlang.org/show_bug.cgi?id=9906
     struct Seen
     {
         static bool opCall(int n) { return true; }
@@ -217,7 +222,7 @@ template binaryFun(alias fun, string parm1Name = "a",
     }
     else static if (needOpCallAlias!fun)
     {
-        // Issue 9906
+        // https://issues.dlang.org/show_bug.cgi?id=9906
         alias binaryFun = fun.opCall;
     }
     else
@@ -247,7 +252,7 @@ template binaryFun(alias fun, string parm1Name = "a",
     //@@BUG
     //assert(binaryFun!("return a + b;")(41, 1) == 42);
 
-    // Issue 9906
+    // https://issues.dlang.org/show_bug.cgi?id=9906
     struct Seen
     {
         static bool opCall(int x, int y) { return true; }
@@ -617,48 +622,6 @@ template reverseArgs(alias pred)
     assert(b() == _b());
 }
 
-// @@@DEPRECATED_2.089@@@
-/**
-Binary predicate that reverses the order of arguments, e.g., given
-$(D pred(a, b)), returns $(D pred(b, a)).
-
-$(RED DEPRECATED: Use $(LREF reverseArgs))
-
-Params:
-    pred = A callable
-Returns:
-    A function which calls `pred` after reversing the given parameters
-*/
-deprecated("Use `reverseArgs`. `binaryReverseArgs` will be removed in 2.089.")
-template binaryReverseArgs(alias pred)
-{
-    auto binaryReverseArgs(ElementType1, ElementType2)
-            (auto ref ElementType1 a, auto ref ElementType2 b)
-    {
-        return pred(b, a);
-    }
-}
-
-///
-deprecated
-@safe unittest
-{
-    alias gt = binaryReverseArgs!(binaryFun!("a < b"));
-    assert(gt(2, 1) && !gt(1, 1));
-}
-
-///
-deprecated
-@safe unittest
-{
-    int x = 42;
-    bool xyz(int a, int b) { return a * x < b / x; }
-    auto foo = &xyz;
-    foo(4, 5);
-    alias zyx = binaryReverseArgs!(foo);
-    assert(zyx(5, 4) == foo(4, 5));
-}
-
 /**
 Negates predicate `pred`.
 
@@ -877,7 +840,7 @@ template partial(alias fun, alias arg)
     assert(dg2() == 1);
 }
 
-// Fix issue 15732
+// Fix https://issues.dlang.org/show_bug.cgi?id=15732
 @safe unittest
 {
     // Test whether it works with functions.
@@ -897,6 +860,181 @@ template partial(alias fun, alias arg)
     }
     auto result2 = partialDelegate(4)(2);
     assert(result2 == 1.5f);
+}
+
+/**
+Takes a function of (potentially) many arguments, and returns a function taking
+one argument and returns a callable taking the rest.  f(x, y) == curry(f)(x)(y)
+
+Params:
+    F = a function taking at least one argument
+    t = a callable object whose opCall takes at least 1 object
+Returns:
+    A single parameter callable object
+*/
+template curry(alias F)
+if (isCallable!F && Parameters!F.length)
+{
+    //inspired from the implementation from Artur Skawina here:
+    //https://forum.dlang.org/post/mailman.1626.1340110492.24740.digitalmars-d@puremagic.com
+    //This implementation stores a copy of all filled in arguments with each curried result
+    //this way, the curried functions are independent and don't share any references
+    //eg: auto fc = curry!f;  auto fc1 = fc(1); auto fc2 = fc(2); fc1(3) != fc2(3)
+    struct CurryImpl(size_t N)
+    {
+        alias FParams = Parameters!F;
+        FParams[0 .. N] storedArguments;
+        static if (N > 0)
+        {
+            this(U : FParams[N - 1])(ref CurryImpl!(N - 1) prev, ref U arg)
+            {
+                storedArguments[0 .. N - 1] = prev.storedArguments[];
+                storedArguments[N-1] = arg;
+            }
+        }
+
+        auto opCall(U : FParams[N])(auto ref U arg) return scope
+        {
+            static if (N == FParams.length - 1)
+            {
+                return F(storedArguments, arg);
+            }
+            else
+            {
+                return CurryImpl!(N + 1)(this, arg);
+            }
+        }
+    }
+
+    auto curry()
+    {
+        CurryImpl!0 res;
+        return res; // return CurryImpl!0.init segfaults for delegates on Windows
+    }
+}
+
+///
+pure @safe @nogc nothrow unittest
+{
+    int f(int x, int y, int z)
+    {
+        return x + y + z;
+    }
+    auto cf = curry!f;
+    auto cf1 = cf(1);
+    auto cf2 = cf(2);
+
+    assert(cf1(2)(3) == f(1, 2, 3));
+    assert(cf2(2)(3) == f(2, 2, 3));
+}
+
+///ditto
+auto curry(T)(T t)
+if (isCallable!T && Parameters!T.length)
+{
+    static auto fun(ref T inst, ref Parameters!T args)
+    {
+        return inst(args);
+    }
+
+    return curry!fun()(t);
+}
+
+///
+pure @safe @nogc nothrow unittest
+{
+    //works with callable structs too
+    struct S
+    {
+        int w;
+        int opCall(int x, int y, int z)
+        {
+            return w + x + y + z;
+        }
+    }
+
+    S s;
+    s.w = 5;
+
+    auto cs = curry(s);
+    auto cs1 = cs(1);
+    auto cs2 = cs(2);
+
+    assert(cs1(2)(3) == s(1, 2, 3));
+    assert(cs1(2)(3) == (1 + 2 + 3 + 5));
+    assert(cs2(2)(3) ==s(2, 2, 3));
+}
+
+
+@safe pure @nogc nothrow unittest
+{
+    //currying a single argument function does nothing
+    int pork(int a){ return a*2;}
+    auto curryPork = curry!pork;
+    assert(curryPork(0) == pork(0));
+    assert(curryPork(1) == pork(1));
+    assert(curryPork(-1) == pork(-1));
+    assert(curryPork(1000) == pork(1000));
+
+    //test 2 argument function
+    double mixedVeggies(double a, int b, bool)
+    {
+        return a + b;
+    }
+
+    auto mixedCurry = curry!mixedVeggies;
+    assert(mixedCurry(10)(20)(false) == mixedVeggies(10, 20, false));
+    assert(mixedCurry(100)(200)(true) == mixedVeggies(100, 200, true));
+
+    // struct with opCall
+    struct S
+    {
+        double opCall(int x, double y, short z) const pure nothrow @nogc
+        {
+            return x*y*z;
+        }
+    }
+
+    S s;
+    auto curriedStruct = curry(s);
+    assert(curriedStruct(1)(2)(short(3)) == s(1, 2, short(3)));
+    assert(curriedStruct(300)(20)(short(10)) == s(300, 20, short(10)));
+}
+
+pure @safe nothrow unittest
+{
+    auto cfl = curry!((double a, int b)  => a + b);
+    assert(cfl(13)(2) == 15);
+
+    int c = 42;
+    auto cdg = curry!((double a, int b)  => a + b + c);
+    assert(cdg(13)(2) == 57);
+
+    static class C
+    {
+        int opCall(int mult, int add) pure @safe nothrow @nogc scope
+        {
+            return  mult * 42 + add;
+        }
+    }
+
+    scope C ci = new C();
+    scope cc = curry(ci);
+    assert(cc(2)(4) == ci(2, 4));
+}
+
+// Disallows callables without parameters
+pure @safe @nogc nothrow unittest
+{
+    static void noargs() {}
+    static assert(!__traits(compiles, curry!noargs()));
+
+    static struct NoArgs
+    {
+        void opCall() {}
+    }
+
+    static assert(!__traits(compiles, curry(NoArgs.init)));
 }
 
 /**
@@ -1123,18 +1261,22 @@ Note:
 template memoize(alias fun)
 {
     import std.traits : ReturnType;
-    // alias Args = Parameters!fun; // Bugzilla 13580
+     // https://issues.dlang.org/show_bug.cgi?id=13580
+    // alias Args = Parameters!fun;
 
     ReturnType!fun memoize(Parameters!fun args)
     {
         alias Args = Parameters!fun;
         import std.typecons : Tuple;
+        import std.traits : Unqual;
 
-        static ReturnType!fun[Tuple!Args] memo;
+        static Unqual!(ReturnType!fun)[Tuple!Args] memo;
         auto t = Tuple!Args(args);
         if (auto p = t in memo)
             return *p;
-        return memo[t] = fun(args);
+        auto r = fun(args);
+        memo[t] = r;
+        return r;
     }
 }
 
@@ -1142,12 +1284,14 @@ template memoize(alias fun)
 template memoize(alias fun, uint maxSize)
 {
     import std.traits : ReturnType;
-    // alias Args = Parameters!fun; // Bugzilla 13580
+     // https://issues.dlang.org/show_bug.cgi?id=13580
+    // alias Args = Parameters!fun;
     ReturnType!fun memoize(Parameters!fun args)
     {
-        import std.traits : hasIndirections;
+        import std.meta : staticMap;
+        import std.traits : hasIndirections, Unqual;
         import std.typecons : tuple;
-        static struct Value { Parameters!fun args; ReturnType!fun res; }
+        static struct Value { staticMap!(Unqual, Parameters!fun) args; Unqual!(ReturnType!fun) res; }
         static Value[] memo;
         static size_t[] initialized;
 
@@ -1176,7 +1320,9 @@ template memoize(alias fun, uint maxSize)
         if (!bt(initialized.ptr, idx1))
         {
             emplace(&memo[idx1], args, fun(args));
-            bts(initialized.ptr, idx1); // only set to initialized after setting args and value (bugzilla 14025)
+            // only set to initialized after setting args and value
+            // https://issues.dlang.org/show_bug.cgi?id=14025
+            bts(initialized.ptr, idx1);
             return memo[idx1].res;
         }
         else if (memo[idx1].args == args)
@@ -1186,7 +1332,7 @@ template memoize(alias fun, uint maxSize)
         if (!bt(initialized.ptr, idx2))
         {
             emplace(&memo[idx2], memo[idx1]);
-            bts(initialized.ptr, idx2); // only set to initialized after setting args and value (bugzilla 14025)
+            bts(initialized.ptr, idx2);
         }
         else if (memo[idx2].args == args)
             return memo[idx2].res;
@@ -1202,9 +1348,10 @@ template memoize(alias fun, uint maxSize)
  * To _memoize a recursive function, simply insert the memoized call in lieu of the plain recursive call.
  * For example, to transform the exponential-time Fibonacci implementation into a linear-time computation:
  */
-@safe unittest
+@safe nothrow
+unittest
 {
-    ulong fib(ulong n) @safe
+    ulong fib(ulong n) @safe nothrow
     {
         return n < 2 ? n : memoize!fib(n - 2) + memoize!fib(n - 1);
     }
@@ -1284,7 +1431,7 @@ template memoize(alias fun, uint maxSize)
     }
     assert(fact(10) == 3628800);
 
-    // Issue 12568
+    // https://issues.dlang.org/show_bug.cgi?id=12568
     static uint len2(const string s) { // Error
     alias mLen2 = memoize!len2;
     if (s.length == 0)
@@ -1299,7 +1446,8 @@ template memoize(alias fun, uint maxSize)
     assert(func(int.init) == 1);
 }
 
-// 16079: memoize should work with arrays
+// https://issues.dlang.org/show_bug.cgi?id=16079
+// memoize should work with arrays
 @system unittest // not @safe with -dip1000 due to memoize
 {
     int executed = 0;
@@ -1323,7 +1471,7 @@ template memoize(alias fun, uint maxSize)
     assert(executed == 1);
 }
 
-// 16079: memoize should work with structs
+// https://issues.dlang.org/show_bug.cgi?id=16079: memoize should work with structs
 @safe unittest
 {
     int executed = 0;
@@ -1342,7 +1490,18 @@ template memoize(alias fun, uint maxSize)
     assert(executed == 1);
 }
 
-// 16079: memoize should work with classes
+// https://issues.dlang.org/show_bug.cgi?id=20439 memoize should work with void opAssign
+@safe unittest
+{
+    static struct S
+    {
+        void opAssign(S) {}
+    }
+
+    assert(memoize!(() => S()) == S());
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=16079: memoize should work with classes
 @system unittest // not @safe with -dip1000 due to memoize
 {
     int executed = 0;
@@ -1374,6 +1533,33 @@ template memoize(alias fun, uint maxSize)
     assert(firstClass(new Bar(3)).k == 3);
     assert(firstClass(new Bar(3)).k == 3);
     assert(executed == 1);
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=20302
+@system unittest
+{
+    version (none) // TODO change `none` to `all` and fix remaining limitations
+        struct S { const int len; }
+    else
+        struct S { int len; }
+
+    static       string  fun000(      string str,       S s) { return str[0 .. s.len] ~ "123"; }
+    static       string  fun001(      string str, const S s) { return str[0 .. s.len] ~ "123"; }
+    static       string  fun010(const string str,       S s) { return str[0 .. s.len] ~ "123"; }
+    static       string  fun011(const string str, const S s) { return str[0 .. s.len] ~ "123"; }
+    static const(string) fun100(      string str,       S s) { return str[0 .. s.len] ~ "123"; }
+    static const(string) fun101(      string str, const S s) { return str[0 .. s.len] ~ "123"; }
+    static const(string) fun110(const string str,       S s) { return str[0 .. s.len] ~ "123"; }
+    static const(string) fun111(const string str, const S s) { return str[0 .. s.len] ~ "123"; }
+
+    static foreach (fun; AliasSeq!(fun000, fun001, fun010, fun011, fun100, fun101, fun110, fun111))
+    {{
+        alias mfun = memoize!fun;
+        assert(mfun("abcdefgh", S(3)) == "abc123");
+
+        alias mfun2 = memoize!(fun, 42);
+        assert(mfun2("asd", S(3)) == "asd123");
+    }}
 }
 
 private struct DelegateFaker(F)

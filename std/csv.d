@@ -67,6 +67,18 @@
  *              record["Name"], record["Occupation"],
  *              record["Salary"]);
  * }
+ *
+ * // To read the same string from the file "filename.csv":
+ *
+ * auto file = File("filename.csv", "r");
+ *
+ * foreach (record; csvReader!(string[string])
+ *         (file.byLine.joiner("\n"), null))
+ * {
+ *     writefln("%s works as a %s and earns $%s per year.",
+ *              record["Name"], record["Occupation"],
+ *              record["Salary"]);
+ * }
  * -------
  *
  * This module allows content to be iterated by record stored in a struct,
@@ -112,7 +124,8 @@ class CSVException : Exception
     ///
     size_t row, col;
 
-    // FIXME: Use std.exception.basicExceptionCtors here once bug #11500 is fixed
+    // FIXME: Use std.exception.basicExceptionCtors here once
+    // https://issues.dlang.org/show_bug.cgi?id=11500 is fixed
 
     this(string msg, string file = __FILE__, size_t line = __LINE__,
          Throwable next = null) @nogc @safe pure nothrow
@@ -326,7 +339,7 @@ Throws:
 */
 auto csvReader(Contents = string,Malformed ErrorLevel = Malformed.throwException, Range, Separator = char)(Range input,
                  Separator delimiter = ',', Separator quote = '"')
-if (isInputRange!Range && is(Unqual!(ElementType!Range) == dchar)
+if (isInputRange!Range && is(immutable ElementType!Range == immutable dchar)
     && isSomeChar!(Separator)
     && !is(Contents T : T[U], U : string))
 {
@@ -341,7 +354,7 @@ auto csvReader(Contents = string,
                Range, Header, Separator = char)
                 (Range input, Header header,
                  Separator delimiter = ',', Separator quote = '"')
-if (isInputRange!Range && is(Unqual!(ElementType!Range) == dchar)
+if (isInputRange!Range && is(immutable ElementType!Range == immutable dchar)
     && isSomeChar!(Separator)
     && isForwardRange!Header
     && isSomeString!(ElementType!Header))
@@ -357,7 +370,7 @@ auto csvReader(Contents = string,
                Range, Header, Separator = char)
                 (Range input, Header header,
                  Separator delimiter = ',', Separator quote = '"')
-if (isInputRange!Range && is(Unqual!(ElementType!Range) == dchar)
+if (isInputRange!Range && is(immutable ElementType!Range == immutable dchar)
     && isSomeChar!(Separator)
     && is(Header : typeof(null)))
 {
@@ -821,7 +834,7 @@ private pure struct Input(Range, Malformed ErrorLevel)
  */
 private struct CsvReader(Contents, Malformed ErrorLevel, Range, Separator, Header)
 if (isSomeChar!Separator && isInputRange!Range
-    && is(Unqual!(ElementType!Range) == dchar)
+    && is(immutable ElementType!Range == immutable dchar)
     && isForwardRange!Header && isSomeString!(ElementType!Header))
 {
 private:
@@ -1151,7 +1164,7 @@ public:
     }
 }
 
-// Bugzilla 15545
+// https://issues.dlang.org/show_bug.cgi?id=15545
 // @system due to the catch for Throwable
 @system pure unittest
 {
@@ -1404,7 +1417,7 @@ void csvNextToken(Range, Malformed ErrorLevel = Malformed.throwException,
                            Separator sep, Separator quote,
                            bool startQuoted = false)
 if (isSomeChar!Separator && isInputRange!Range
-    && is(Unqual!(ElementType!Range) == dchar)
+    && is(immutable ElementType!Range == immutable dchar)
     && isOutputRange!(Output, dchar))
 {
     bool quoted = startQuoted;
@@ -1705,7 +1718,7 @@ if (isSomeChar!Separator && isInputRange!Range
     assert(a.data == ""d);
 }
 
-// Bugzilla 8908
+// https://issues.dlang.org/show_bug.cgi?id=8908
 @safe pure unittest
 {
     string csv = `  1.0, 2.0, 3.0

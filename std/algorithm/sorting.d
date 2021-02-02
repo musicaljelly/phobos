@@ -224,7 +224,7 @@ if (isForwardRange!(Range))
 {
     import std.conv : to;
 
-    // Issue 9457
+    // https://issues.dlang.org/show_bug.cgi?id=9457
     auto x = "abcd";
     assert(isSorted(x));
     auto y = "acbd";
@@ -642,7 +642,7 @@ if (isRandomAccessRange!Range && hasLength!Range && hasSlicing!Range && hasAssig
         for (;;)
         {
             // Loop invariant
-            version (unittest)
+            version (StdUnittest)
             {
                 // this used to import std.algorithm.all, but we want to save
                 // imports when unittests are enabled if possible.
@@ -1092,8 +1092,8 @@ if (Rs.length >= 2 &&
     }
 
     import std.functional : binaryFun;
+    import std.meta : anySatisfy;
     import std.traits : isCopyable;
-    import std.typetuple : anySatisfy;
 
     private alias comp = binaryFun!less;
     private alias ElementType = CommonType!(staticMap!(.ElementType, Rs));
@@ -1563,7 +1563,8 @@ private void multiSortImpl(Range, SwapStrategy ss, funs...)(Range r)
     assert(pts4.multiSort!("a > b").release.equal(iota(10).retro));
 }
 
-@safe unittest //issue 9160 (L-value only comparators)
+//https://issues.dlang.org/show_bug.cgi?id=9160 (L-value only comparators)
+@safe unittest
 {
     static struct A
     {
@@ -1587,7 +1588,9 @@ private void multiSortImpl(Range, SwapStrategy ss, funs...)(Range r)
     assert(points[1] == A(4, 1));
 }
 
-@safe unittest // issue 16179 (cannot access frame of function)
+// cannot access frame of function
+// https://issues.dlang.org/show_bug.cgi?id=16179
+@safe unittest
 {
     auto arr = [[1, 2], [2, 0], [1, 0], [1, 1]];
     int c = 3;
@@ -1599,7 +1602,8 @@ private void multiSortImpl(Range, SwapStrategy ss, funs...)(Range r)
     assert(arr == [[1, 0], [1, 1], [1, 2], [2, 0]]);
 }
 
-@safe unittest //Issue 16413 - @system comparison function
+// https://issues.dlang.org/show_bug.cgi?id=16413 - @system comparison function
+@safe unittest
 {
     bool lt(int a, int b) { return a < b; } static @system
     auto a = [2, 1];
@@ -1694,17 +1698,30 @@ private void shortSort(alias less, Range)(Range r)
                 auto t = r[0]; if (pred(t, r[0])) r[0] = r[0];
             }))) // Can we afford to temporarily invalidate the array?
         {
+            import core.lifetime : move;
+
             size_t j = i + 1;
-            auto temp = r[i];
+            static if (hasLvalueElements!Range)
+                auto temp = move(r[i]);
+            else
+                auto temp = r[i];
+
             if (pred(r[j], temp))
             {
                 do
                 {
-                    r[j - 1] = r[j];
+                    static if (hasLvalueElements!Range)
+                        trustedMoveEmplace(r[j], r[j - 1]);
+                    else
+                        r[j - 1] = r[j];
                     ++j;
                 }
                 while (j < r.length && pred(r[j], temp));
-                r[j - 1] = temp;
+
+                static if (hasLvalueElements!Range)
+                    trustedMoveEmplace(temp, r[j - 1]);
+                else
+                    r[j - 1] = move(temp);
             }
         }
         else
@@ -1719,6 +1736,13 @@ private void shortSort(alias less, Range)(Range r)
         }
         if (i == 0) break;
     }
+}
+
+/// @trusted wrapper for moveEmplace
+private void trustedMoveEmplace(T)(ref T source, ref T target) @trusted
+{
+    import core.lifetime : moveEmplace;
+    moveEmplace(source, target);
 }
 
 @safe unittest
@@ -1954,7 +1978,7 @@ if (((ss == SwapStrategy.unstable && (hasSwappableElements!Range ||
 
     // This should get smaller with time. On occasion it may go larger, but only
     // if there's thorough justification.
-    debug enum uint watermark = 1676280;
+    debug enum uint watermark = 1676220;
     else enum uint watermark = 1676220;
 
     import std.conv;
@@ -2015,14 +2039,14 @@ if (((ss == SwapStrategy.unstable && (hasSwappableElements!Range ||
     assert(isSorted!("toUpper(a) < toUpper(b)")(b));
 
     {
-        // Issue 10317
+        // https://issues.dlang.org/show_bug.cgi?id=10317
         enum E_10317 { a, b }
         auto a_10317 = new E_10317[10];
         sort(a_10317);
     }
 
     {
-        // Issue 7767
+        // https://issues.dlang.org/show_bug.cgi?id=7767
         // Unstable sort should complete without an excessive number of predicate calls
         // This would suggest it's running in quadratic time
 
@@ -2062,6 +2086,17 @@ if (((ss == SwapStrategy.unstable && (hasSwappableElements!Range ||
         static assert(!hasAssignableElements!R);
         r.sort();
         assert(proxySwapCalled);
+    }
+
+    // https://issues.dlang.org/show_bug.cgi?id=20751
+    {
+        static bool refPred(ref int a, ref int b)
+        {
+            return a < b;
+        }
+
+        auto sortedArr = [5,4,3,2,1].sort!refPred;
+        sortedArr.equalRange(3);
     }
 }
 
@@ -2137,7 +2172,7 @@ package(std) template HeapOps(alias less, Range)
 
     alias lessFun = binaryFun!less;
 
-    //template because of @@@12410@@@
+    //template because of https://issues.dlang.org/show_bug.cgi?id=12410
     void heapSort()(Range r)
     {
         // If true, there is nothing to do
@@ -2152,7 +2187,7 @@ package(std) template HeapOps(alias less, Range)
         }
     }
 
-    //template because of @@@12410@@@
+    //template because of https://issues.dlang.org/show_bug.cgi?id=12410
     void buildHeap()(Range r)
     {
         immutable n = r.length;
@@ -2177,7 +2212,7 @@ package(std) template HeapOps(alias less, Range)
 
     // Sifts down r[parent] (which is initially assumed to be messed up) so the
     // heap property is restored for r[parent .. end].
-    // template because of @@@12410@@@
+    // template because of https://issues.dlang.org/show_bug.cgi?id=12410
     void siftDown()(Range r, size_t parent, immutable size_t end)
     {
         for (;;)
@@ -2205,7 +2240,7 @@ package(std) template HeapOps(alias less, Range)
     // restored. So there are more swaps but fewer comparisons. Gains are made
     // when the final position is likely to end toward the bottom of the heap,
     // so not a lot of sifts back are performed.
-    //template because of @@@12410@@@
+    //template because of https://issues.dlang.org/show_bug.cgi?id=12410
     void percolate()(Range r, size_t parent, immutable size_t end)
     {
         immutable root = parent;
@@ -2259,9 +2294,9 @@ private template TimSortImpl(alias pred, R)
     alias T = ElementType!R;
 
     alias less = binaryFun!pred;
-    alias greater = (a, b) => less(b, a);
-    alias greaterEqual = (a, b) => !less(a, b);
-    alias lessEqual = (a, b) => !less(b, a);
+    bool greater()(auto ref T a, auto ref T b) { return less(b, a); }
+    bool greaterEqual()(auto ref T a, auto ref T b) { return !less(a, b); }
+    bool lessEqual()(auto ref T a, auto ref T b) { return !less(b, a); }
 
     enum minimalMerge = 128;
     enum minimalGallop = 7;
@@ -2332,7 +2367,7 @@ private template TimSortImpl(alias pred, R)
             }
 
             // Assert that the code above established the invariant correctly
-            version (assert)
+            version (StdUnittest)
             {
                 if (stackLen == 2)
                 {
@@ -2433,8 +2468,17 @@ private template TimSortImpl(alias pred, R)
             //moveAll(retro(range[lower .. sortedLen]),
             //            retro(range[lower+1 .. sortedLen+1]));
             for (upper=sortedLen; upper > lower; upper--)
-                range[upper] = range.moveAt(upper - 1);
-            range[lower] = move(item);
+            {
+                static if (hasLvalueElements!R)
+                    move(range[upper -1], range[upper]);
+                else
+                    range[upper] = range.moveAt(upper - 1);
+            }
+
+            static if (hasLvalueElements!R)
+                move(item, range[lower]);
+            else
+                range[lower] = move(item);
         }
     }
 
@@ -2540,7 +2584,7 @@ private template TimSortImpl(alias pred, R)
         copy(range[0 .. mid], temp);
 
         // Move first element into place
-        range[0] = range[mid];
+        moveEntry(range, mid, range, 0);
 
         size_t i = 1, lef = 0, rig = mid + 1;
         size_t count_lef, count_rig;
@@ -2557,14 +2601,14 @@ private template TimSortImpl(alias pred, R)
             {
                 if (lessEqual(temp[lef], range[rig]))
                 {
-                    range[i++] = temp[lef++];
+                    moveEntry(temp, lef++, range, i++);
                     if (lef >= lef_end) break outer;
                     ++count_lef;
                     count_rig = 0;
                 }
                 else
                 {
-                    range[i++] = range[rig++];
+                    moveEntry(range, rig++, range, i++);
                     if (rig >= range.length) break outer;
                     count_lef = 0;
                     ++count_rig;
@@ -2575,14 +2619,14 @@ private template TimSortImpl(alias pred, R)
             do
             {
                 count_lef = gallopForwardUpper(temp[lef .. $], range[rig]);
-                foreach (j; 0 .. count_lef) range[i++] = temp[lef++];
+                foreach (j; 0 .. count_lef) moveEntry(temp, lef++, range, i++);
                 if (lef >= temp.length) break outer;
 
                 count_rig = gallopForwardLower(range[rig .. range.length], temp[lef]);
-                foreach (j; 0 .. count_rig) range[i++] = range[rig++];
+                foreach (j; 0 .. count_rig) moveEntry(range, rig++, range, i++);
                 if (rig >= range.length) while (true)
                 {
-                    range[i++] = temp[lef++];
+                    moveEntry(temp, lef++, range, i++);
                     if (lef >= temp.length) break outer;
                 }
 
@@ -2595,11 +2639,11 @@ private template TimSortImpl(alias pred, R)
 
         // Move remaining elements from right
         while (rig < range.length)
-            range[i++] = range[rig++];
+            moveEntry(range, rig++, range, i++);
 
         // Move remaining elements from left
         while (lef < temp.length)
-            range[i++] = temp[lef++];
+            moveEntry(temp, lef++, range, i++);
 
         return minGallop > 0 ? minGallop : 1;
     }
@@ -2626,7 +2670,7 @@ private template TimSortImpl(alias pred, R)
         copy(range[mid .. range.length], temp);
 
         // Move first element into place
-        range[range.length - 1] = range[mid - 1];
+        moveEntry(range, mid - 1, range, range.length - 1);
 
         size_t i = range.length - 2, lef = mid - 2, rig = temp.length - 1;
         size_t count_lef, count_rig;
@@ -2642,19 +2686,19 @@ private template TimSortImpl(alias pred, R)
             {
                 if (greaterEqual(temp[rig], range[lef]))
                 {
-                    range[i--] = temp[rig];
+                    moveEntry(temp, rig, range, i--);
                     if (rig == 1)
                     {
                         // Move remaining elements from left
                         while (true)
                         {
-                            range[i--] = range[lef];
+                            moveEntry(range, lef, range, i--);
                             if (lef == 0) break;
                             --lef;
                         }
 
                         // Move last element into place
-                        range[i] = temp[0];
+                        moveEntry(temp, 0, range, i);
 
                         break outer;
                     }
@@ -2664,10 +2708,10 @@ private template TimSortImpl(alias pred, R)
                 }
                 else
                 {
-                    range[i--] = range[lef];
+                    moveEntry(range, lef, range, i--);
                     if (lef == 0) while (true)
                     {
-                        range[i--] = temp[rig];
+                        moveEntry(temp, rig, range, i--);
                         if (rig == 0) break outer;
                         --rig;
                     }
@@ -2683,7 +2727,7 @@ private template TimSortImpl(alias pred, R)
                 count_rig = rig - gallopReverseLower(temp[0 .. rig], range[lef]);
                 foreach (j; 0 .. count_rig)
                 {
-                    range[i--] = temp[rig];
+                    moveEntry(temp, rig, range, i--);
                     if (rig == 0) break outer;
                     --rig;
                 }
@@ -2691,10 +2735,10 @@ private template TimSortImpl(alias pred, R)
                 count_lef = lef - gallopReverseUpper(range[0 .. lef], temp[rig]);
                 foreach (j; 0 .. count_lef)
                 {
-                    range[i--] = range[lef];
+                    moveEntry(range, lef, range, i--);
                     if (lef == 0) while (true)
                     {
-                        range[i--] = temp[rig];
+                        moveEntry(temp, rig, range, i--);
                         if (rig == 0) break outer;
                         --rig;
                     }
@@ -2791,6 +2835,21 @@ private template TimSortImpl(alias pred, R)
     alias gallopForwardUpper = gallopSearch!(false,  true);
     alias gallopReverseLower = gallopSearch!( true, false);
     alias gallopReverseUpper = gallopSearch!( true,  true);
+
+    /// Helper method that moves from[fIdx] into to[tIdx] if both are lvalues and
+    /// uses a plain assignment if not (necessary for backwards compatibility)
+    void moveEntry(X, Y)(ref X from, const size_t fIdx, ref Y to, const size_t tIdx)
+    {
+        // This template is instantiated with different combinations of range (R) and temp (T[]).
+        // T[] obviously has lvalue-elements, so checking R should be enough here
+        static if (hasLvalueElements!R)
+        {
+            import core.lifetime : move;
+            move(from[fIdx], to[tIdx]);
+        }
+        else
+            to[tIdx] = from[fIdx];
+    }
 }
 
 @safe unittest
@@ -2873,8 +2932,9 @@ private template TimSortImpl(alias pred, R)
     assert(result == true, "invalid result");
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=4584
 @safe unittest
-{//bugzilla 4584
+{
     assert(isSorted!"a < b"(sort!("a < b", SwapStrategy.stable)(
        [83, 42, 85, 86, 87, 22, 89, 30, 91, 46, 93, 94, 95, 6,
          97, 14, 33, 10, 101, 102, 103, 26, 105, 106, 107, 6]
@@ -2894,12 +2954,46 @@ private template TimSortImpl(alias pred, R)
     assert(y == "aebcd"d);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=14223
 @safe unittest
 {
-    // Issue 14223
     import std.array, std.range;
     auto arr = chain(iota(0, 384), iota(0, 256), iota(0, 80), iota(0, 64), iota(0, 96)).array;
     sort!("a < b", SwapStrategy.stable)(arr);
+}
+
+@safe unittest
+{
+    static struct NoCopy
+    {
+        pure nothrow @nogc @safe:
+
+        int key;
+        this(scope const ref NoCopy)
+        {
+            assert(false, "Tried to copy struct!");
+        }
+        ref opAssign()(scope const auto ref NoCopy other)
+        {
+            assert(false, "Tried to copy struct!");
+        }
+        this(this) {}
+    }
+
+    static NoCopy[] makeArray(const size_t size)
+    {
+        NoCopy[] array = new NoCopy[](size);
+        foreach (const i, ref t; array[0..$/2]) t.key = cast(int) (size - i);
+        foreach (const i, ref t; array[$/2..$]) t.key = cast(int) i;
+        return array;
+    }
+
+    alias cmp = (ref NoCopy a, ref NoCopy b) => a.key < b.key;
+    enum minMerge = TimSortImpl!(cmp, NoCopy[]).minimalMerge;
+
+    sort!(cmp, SwapStrategy.unstable)(makeArray(20));
+    sort!(cmp, SwapStrategy.stable)(makeArray(minMerge - 5));
+    sort!(cmp, SwapStrategy.stable)(makeArray(minMerge + 5));
 }
 
 // schwartzSort
@@ -2941,8 +3035,10 @@ because the effect can be achieved by calling $(D
 isSorted!less(map!transform(r))).
 
 Params:
-    transform = The transformation to apply.
-    less = The predicate to sort by.
+    transform = The transformation to apply. Either a unary function
+                (`unaryFun!transform(element)`), or a binary function
+                (`binaryFun!transform(element, index)`).
+    less = The predicate to sort the transformed elements by.
     ss = The swapping strategy to use.
     r = The range to sort.
 
@@ -2960,7 +3056,28 @@ if (isRandomAccessRange!R && hasLength!R && hasSwappableElements!R &&
     import std.range : zip, SortedRange;
     import std.string : representation;
 
-    alias T = typeof(unaryFun!transform(r.front));
+    static if (is(typeof(unaryFun!transform(r.front))))
+    {
+        alias transformFun = unaryFun!transform;
+        alias TB = typeof(transformFun(r.front));
+        enum isBinary = false;
+    }
+    else static if (is(typeof(binaryFun!transform(r.front, 0))))
+    {
+        alias transformFun = binaryFun!transform;
+        alias TB = typeof(transformFun(r.front, 0));
+        enum isBinary = true;
+    }
+    else
+        static assert(false, "unsupported `transform` alias");
+
+    // The `transform` function might return a qualified type, e.g. const(int).
+    // Strip qualifiers if possible s.t. the temporary array is sortable.
+    static if (is(TB : Unqual!TB))
+        alias T = Unqual!TB;
+    else
+        static assert(false, "`transform` returns an unsortable qualified type: " ~ TB.stringof);
+
     static trustedMalloc(size_t len) @trusted
     {
         import core.checkedint : mulu;
@@ -2968,7 +3085,13 @@ if (isRandomAccessRange!R && hasLength!R && hasSwappableElements!R &&
         bool overflow;
         const nbytes = mulu(len, T.sizeof, overflow);
         if (overflow) assert(false, "multiplication overflowed");
-        return (cast(T*) malloc(nbytes))[0 .. len];
+        T[] result = (cast(T*) malloc(nbytes))[0 .. len];
+        static if (hasIndirections!T)
+        {
+            import core.memory : GC;
+            GC.addRange(result.ptr, nbytes);
+        }
+        return result;
     }
     auto xform1 = trustedMalloc(r.length);
 
@@ -2982,13 +3105,21 @@ if (isRandomAccessRange!R && hasLength!R && hasSwappableElements!R &&
         static void trustedFree(T[] p) @trusted
         {
             import core.stdc.stdlib : free;
+            static if (hasIndirections!T)
+            {
+                import core.memory : GC;
+                GC.removeRange(p.ptr);
+            }
             free(p.ptr);
         }
         trustedFree(xform1);
     }
     for (; length != r.length; ++length)
     {
-        emplace(&xform1[length], unaryFun!transform(r[length]));
+        static if (isBinary)
+            emplace(&xform1[length], transformFun(r[length], length));
+        else
+            emplace(&xform1[length], transformFun(r[length]));
     }
     // Make sure we use ubyte[] and ushort[], not char[] and wchar[]
     // for the intermediate array, lest zip gets confused.
@@ -3056,31 +3187,39 @@ if (isRandomAccessRange!R && hasLength!R && hasSwappableElements!R)
 
 @safe unittest
 {
-    // issue 4909
+    // binary transform function
+    string[] strings = [ "one", "two", "three" ];
+    schwartzSort!((element, index) => size_t.max - index)(strings);
+    assert(strings == [ "three", "two", "one" ]);
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=4909
+@safe unittest
+{
     import std.typecons : Tuple;
     Tuple!(char)[] chars;
     schwartzSort!"a[0]"(chars);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=5924
 @safe unittest
 {
-    // issue 5924
     import std.typecons : Tuple;
     Tuple!(char)[] chars;
     schwartzSort!((Tuple!(char) c){ return c[0]; })(chars);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=13965
 @safe unittest
 {
-    // issue 13965
     import std.typecons : Tuple;
     Tuple!(char)[] chars;
     schwartzSort!("a[0]", SwapStrategy.stable)(chars);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=13965
 @safe unittest
 {
-    // issue 13965
     import std.algorithm.iteration : map;
     import std.numeric : entropy;
 
@@ -3098,6 +3237,49 @@ if (isRandomAccessRange!R && hasLength!R && hasSwappableElements!R)
     assert(arr[1] == midEnt);
     assert(arr[2] == highEnt);
     assert(isSorted!("a < b")(map!(entropy)(arr)));
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=20799
+@safe unittest
+{
+    import std.range : iota, retro;
+    import std.array : array;
+
+    auto arr = 1_000_000.iota.retro.array;
+    arr.schwartzSort!(
+        n => new int(n),
+        (a, b) => *a < *b
+    );
+    assert(arr.isSorted());
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=21183
+@safe unittest
+{
+    static T get(T)(int) { return T.init; }
+
+    // There's no need to actually sort, just checking type interference
+    if (false)
+    {
+        int[] arr;
+
+        // Fine because there are no indirections
+        arr.schwartzSort!(get!(const int));
+
+        // Fine because it decays to immutable(int)*
+        arr.schwartzSort!(get!(immutable int*));
+
+        // Disallowed because it would require a non-const reference
+        static assert(!__traits(compiles, arr.schwartzSort!(get!(const Object))));
+
+        static struct Wrapper
+        {
+            int* ptr;
+        }
+
+        // Disallowed because Wrapper.ptr would become mutable
+        static assert(!__traits(compiles, arr.schwartzSort!(get!(const Wrapper))));
+    }
 }
 
 // partialSort
@@ -3643,7 +3825,7 @@ done:
     }
 }
 
-// bug 12987
+// https://issues.dlang.org/show_bug.cgi?id=12987
 @safe unittest
 {
     int[] a = [ 25, 7, 9, 2, 0, 5, 21 ];
@@ -3693,7 +3875,7 @@ if (isRandomAccessRange!(Range1) && hasLength!Range1 &&
     assert(a == [0, 1, 2, 2, 3]);
 }
 
-// bug 15421
+// https://issues.dlang.org/show_bug.cgi?id=15421
 @system unittest
 {
     import std.algorithm.comparison : equal;
@@ -3737,7 +3919,7 @@ if (isRandomAccessRange!(Range1) && hasLength!Range1 &&
     }
 }
 
-// bug 15421
+// https://issues.dlang.org/show_bug.cgi?id=15421
 @system unittest
 {
     auto a = [ 9, 8, 0, 3, 5, 25, 43, 4, 2, 0, 7 ];
@@ -3756,7 +3938,7 @@ if (isRandomAccessRange!(Range1) && hasLength!Range1 &&
     assert(a == b);
 }
 
-// bug 12987
+// https://issues.dlang.org/show_bug.cgi?id=12987
 @system unittest
 {
     int[] a = [ 5, 7, 2, 6, 7 ];
@@ -3766,7 +3948,7 @@ if (isRandomAccessRange!(Range1) && hasLength!Range1 &&
     assert(t == [ 0, 1, 2, 2, 3 ]);
 }
 
-// bug 15420
+// https://issues.dlang.org/show_bug.cgi?id=15420
 @system unittest
 {
     int[] a = [ 5, 7, 2, 6, 7 ];
@@ -4082,7 +4264,7 @@ if (isRandomAccessRange!Range && hasLength!Range &&
     else static if (k == 5)
     {
         // Credit: Teppo Niinimäki
-        version (unittest) scope(success)
+        version (StdUnittest) scope(success)
         {
             assert(!lt(r[c], r[a]), "less than check failed");
             assert(!lt(r[c], r[b]), "less than check failed");
@@ -4359,7 +4541,7 @@ if (isBidirectionalRange!BidirectionalRange &&
     assert(a == [3,2,1]);
 }
 
-// Issue 13594
+// https://issues.dlang.org/show_bug.cgi?id=13594
 @safe unittest
 {
     int[3] a = [1,2,3];
@@ -4534,9 +4716,9 @@ if (isBidirectionalRange!BidirectionalRange &&
     assert(b == [ 1, 3, 2 ]);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=13594
 @safe unittest
 {
-    // Issue 13594
     int[3] a = [1,2,3];
     assert(nextEvenPermutation(a[]));
     assert(a == [2,3,1]);

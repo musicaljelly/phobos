@@ -1366,6 +1366,7 @@ struct BitmappedBlock(size_t theBlockSize, uint theAlignment = platformAlignment
     }
     else
     {
+        version (StdUnittest)
         @system unittest
         {
             import std.algorithm.comparison : max;
@@ -1640,7 +1641,7 @@ shared struct SharedBitmappedBlock(size_t theBlockSize, uint theAlignment = plat
     }
     else
     {
-        version (unittest)
+        version (StdUnittest)
         @system unittest
         {
             import std.algorithm.comparison : max;
@@ -1759,12 +1760,14 @@ pure @safe unittest
     assert(b.length == 100);
 }
 
+version (StdUnittest)
 @system unittest
 {
     import std.experimental.allocator.gc_allocator : GCAllocator;
     testAllocator!(() => BitmappedBlock!(64, 8, GCAllocator)(1024 * 64));
 }
 
+version (StdUnittest)
 @system unittest
 {
     // Test chooseAtRuntime
@@ -1774,6 +1777,7 @@ pure @safe unittest
     testAllocator!(() => BitmappedBlock!(chooseAtRuntime, 8, GCAllocator, No.multiblock)(1024 * 64, blockSize));
 }
 
+version (StdUnittest)
 @system unittest
 {
     import std.experimental.allocator.mallocator : Mallocator;
@@ -1781,6 +1785,7 @@ pure @safe unittest
     testAllocator!(() => SharedBitmappedBlock!(64, 8, Mallocator, No.multiblock)(1024 * 64));
 }
 
+version (StdUnittest)
 @system unittest
 {
     // Test chooseAtRuntime
@@ -2167,6 +2172,7 @@ struct BitmappedBlockWithInternalPointers(
     import std.typecons : Ternary;
 
     static if (!stateSize!ParentAllocator)
+    version (StdUnittest)
     @system unittest
     {
         import std.experimental.allocator.mallocator : AlignedMallocator;
@@ -2450,13 +2456,9 @@ If `x` contains no zeros (i.e. is equal to `ulong.max`), returns 64.
 pure nothrow @safe @nogc
 private uint leadingOnes(ulong x)
 {
-    uint result = 0;
-    while (cast(long) x < 0)
-    {
-        ++result;
-        x <<= 1;
-    }
-    return result;
+    import core.bitop : bsr;
+    const x_ = ~x;
+    return x_ == 0 ? 64 : (63 - bsr(x_));
 }
 
 @safe unittest

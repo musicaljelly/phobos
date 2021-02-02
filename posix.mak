@@ -37,7 +37,7 @@ DMD_DIR=../dmd
 include $(DMD_DIR)/src/osmodel.mak
 
 ifeq (osx,$(OS))
-	export MACOSX_DEPLOYMENT_TARGET=10.7
+	export MACOSX_DEPLOYMENT_TARGET=10.9
 endif
 
 # Default to a release build, override with BUILD=debug
@@ -78,7 +78,7 @@ ROOT_OF_THEM_ALL = generated
 ROOT = $(ROOT_OF_THEM_ALL)/$(OS)/$(BUILD)/$(MODEL)
 DUB=dub
 TOOLS_DIR=../tools
-DSCANNER_HASH=b51ee472fe29c05cc33359ab8de52297899131fe
+DSCANNER_HASH=9364d6f15f4a610fda49a693dbc18608bfc701bb
 DSCANNER_DIR=$(ROOT_OF_THEM_ALL)/dscanner-$(DSCANNER_HASH)
 
 # Set DRUNTIME name and full path
@@ -139,7 +139,7 @@ endif
 
 # Set DFLAGS
 DFLAGS=
-override DFLAGS+=-conf= -I$(DRUNTIME_PATH)/import $(DMDEXTRAFLAGS) -w -de -preview=dip1000 $(MODEL_FLAG) $(PIC) -transition=complex
+override DFLAGS+=-conf= -I$(DRUNTIME_PATH)/import $(DMDEXTRAFLAGS) -w -de -preview=dip1000 -preview=dtorfields $(MODEL_FLAG) $(PIC) -transition=complex
 ifeq ($(BUILD),debug)
 override DFLAGS += -g -debug
 else
@@ -147,10 +147,18 @@ override DFLAGS += -O -release
 endif
 
 ifdef ENABLE_COVERAGE
-override DFLAGS  += -cov
+override DFLAGS  += -cov=ctfe
 endif
 
-UDFLAGS=-unittest
+ifdef NO_AUTODECODE
+override DFLAGS += -version=NoAutodecodeStrings
+endif
+
+ifdef NO_AUTODECODE
+override DFLAGS += -version=NoAutodecodeStrings
+endif
+
+UDFLAGS=-unittest -version=StdUnittest
 
 # Set DOTOBJ and DOTEXE
 ifeq (,$(findstring win,$(OS)))
@@ -199,7 +207,7 @@ P2MODULES=$(foreach P,$1,$(addprefix $P/,$(PACKAGE_$(subst /,_,$P))))
 STD_PACKAGES = std $(addprefix std/,\
   algorithm container datetime digest experimental/allocator \
   experimental/allocator/building_blocks experimental/logger \
-  net \
+  net uni \
   experimental range regex windows)
 
 # Modules broken down per package
@@ -208,7 +216,7 @@ PACKAGE_std = array ascii base64 bigint bitmanip compiler complex concurrency \
   conv csv demangle encoding exception file format \
   functional getopt json math mathspecial meta mmfile numeric \
   outbuffer package parallelism path process random signals socket stdint \
-  stdio string system traits typecons uni \
+  stdio string system traits typecons \
   uri utf uuid variant xml zip zlib
 PACKAGE_std_experimental = checkedint typecons
 PACKAGE_std_algorithm = comparison iteration mutation package searching setops \
@@ -229,10 +237,15 @@ PACKAGE_std_net = curl isemail
 PACKAGE_std_range = interfaces package primitives
 PACKAGE_std_regex = package $(addprefix internal/,generator ir parser \
   backtracking tests tests2 thompson kickstart)
+PACKAGE_std_uni = package
 PACKAGE_std_windows = charset registry syserror
 
 # Modules in std (including those in packages)
 STD_MODULES=$(call P2MODULES,$(STD_PACKAGES))
+
+# NoAutodecode test modules.
+# List all modules whose unittests are known to work without autodecode enabled.
+NO_AUTODECODE_MODULES= std/utf
 
 # Other D modules that aren't under std/
 EXTRA_MODULES_COMMON := $(addprefix etc/c/,curl odbc/sql odbc/sqlext \
@@ -292,9 +305,14 @@ else
 all : lib
 endif
 
+ifneq (,$(findstring Darwin_64_32, $(PWD)))
+install:
+	echo "Darwin_64_32_disabled"
+else
 install :
 	$(MAKE) -f $(MAKEFILE) OS=$(OS) MODEL=$(MODEL) BUILD=release INSTALL_DIR=$(INSTALL_DIR) \
 		DMD=$(DMD) install2
+endif
 
 .PHONY : unittest
 ifeq (1,$(BUILD_WAS_SPECIFIED))
@@ -400,7 +418,7 @@ unittest/%.run : $(ROOT)/unittest/test_runner
 %.test : %.d $(LIB)
 	T=`mktemp -d /tmp/.dmd-run-test.XXXXXX` &&                                                              \
 	  (                                                                                                     \
-	    $(DMD) -od$$T $(DFLAGS) -main $(UDFLAGS) $(LIB) $(NODEFAULTLIB) $(LINKDL) -cov -run $< ;     \
+	    $(DMD) -od$$T $(DFLAGS) -main $(UDFLAGS) $(LIB) $(NODEFAULTLIB) $(LINKDL) -cov=ctfe -run $< ;     \
 	    RET=$$? ; rm -rf $$T ; exit $$RET                                                                   \
 	  )
 
@@ -490,7 +508,7 @@ $(JSON) : $(ALL_D_FILES)
 ###########################################################
 SRC_DOCUMENTABLES = index.d $(addsuffix .d,$(STD_MODULES) $(EXTRA_DOCUMENTABLES))
 # Set DDOC, the documentation generator
-DDOC=$(DMD) -conf= $(MODEL_FLAG) -w -c -o- -preview=markdown -version=StdDdoc \
+DDOC=$(DMD) -conf= $(MODEL_FLAG) -w -c -o- -version=StdDdoc \
 	-I$(DRUNTIME_PATH)/import $(DMDEXTRAFLAGS)
 
 # D file to html, e.g. std/conv.d -> std_conv.html
@@ -549,19 +567,19 @@ $(DSCANNER_DIR)/dsc: | $(DSCANNER_DIR) $(DMD) $(LIB)
 	mv $(DSCANNER_DIR)/dscanner_makefile_tmp $(DSCANNER_DIR)/makefile
 	DC=$(abspath $(DMD)) DFLAGS="$(DFLAGS) -defaultlib=$(LIB)" $(MAKE) -C $(DSCANNER_DIR) githash debug
 
-style: publictests style_lint
+style: style_lint publictests
 
 # runs static code analysis with Dscanner
-dscanner:
+dscanner: $(LIB)
 	@# The dscanner target is without dependencies to avoid constant rebuilds of Phobos (`make` always rebuilds order-only dependencies)
 	@# However, we still need to ensure that the DScanner binary is built once
 	@[ -f $(DSCANNER_DIR)/dsc ] || ${MAKE} -f posix.mak $(DSCANNER_DIR)/dsc
 	@echo "Running DScanner"
 	$(DSCANNER_DIR)/dsc --config .dscanner.ini --styleCheck etc std -I.
 
-style_lint: dscanner $(LIB)
+style_lint_shellcmds:
 	@echo "Check for trailing whitespace"
-	grep -nr '[[:blank:]]$$' etc std ; test $$? -eq 1
+	grep -nr '[[:blank:]]$$' $$(find etc std -name '*.d'); test $$? -eq 1
 
 	@echo "Enforce whitespace before opening parenthesis"
 	grep -nrE "\<(for|foreach|foreach_reverse|if|while|switch|catch|version)\(" $$(find etc std -name '*.d') ; test $$? -eq 1
@@ -588,7 +606,7 @@ style_lint: dscanner $(LIB)
 	grep -nrE '[^"]cast\([^)]*?\)[[:alnum:]]' $$(find etc std -name '*.d') ; test $$? -eq 1
 
 	@echo "Enforce space between a .. b"
-	grep -nrE '[[:alnum:]][.][.][[:alnum:]]|[[:alnum:]] [.][.][[:alnum:]]|[[:alnum:]][.][.] [[:alnum:]]' $$(find etc std -name '*.d' | grep -vE 'std/string.d|std/uni.d') ; test $$? -eq 1
+	grep -nrE '[[:alnum:]][.][.][[:alnum:]]|[[:alnum:]] [.][.][[:alnum:]]|[[:alnum:]][.][.] [[:alnum:]]' $$(find etc std -name '*.d' | grep -vE 'std/string.d|std/uni/package.d') ; test $$? -eq 1
 
 	@echo "Enforce space between binary operators"
 	grep -nrE "[[:alnum:]](==|!=|<=|<<|>>|>>>|^^)[[:alnum:]]|[[:alnum:]] (==|!=|<=|<<|>>|>>>|^^)[[:alnum:]]|[[:alnum:]](==|!=|<=|<<|>>|>>>|^^) [[:alnum:]]" $$(find etc std -name '*.d'); test $$? -eq 1
@@ -603,6 +621,7 @@ style_lint: dscanner $(LIB)
 		{ echo "$$file: The title is supposed to be followed by a long description" && exit 1; } ;\
 	done
 
+style_lint: style_lint_shellcmds dscanner
 	@echo "Check that Ddoc runs without errors"
 	$(DMD) $(DFLAGS) $(NODEFAULTLIB) $(LIB) -w -D -Df/dev/null -main -c -o- $$(find etc std -type f -name '*.d') 2>&1
 
@@ -646,9 +665,9 @@ betterc: betterc-phobos-tests
 	@# Due to the FORCE rule on druntime, make will always try to rebuild Phobos (even as an order-only dependency)
 	@# However, we still need to ensure that the test_extractor is built once
 	@[ -f "$(TESTS_EXTRACTOR)" ] || ${MAKE} -f posix.mak "$(TESTS_EXTRACTOR)"
-	@$(TESTS_EXTRACTOR) --betterC --attributes betterC \
+	$(TESTS_EXTRACTOR) --betterC --attributes betterC \
 		--inputdir  $< --outputdir $(BETTERCTESTS_DIR)
-	@$(DMD) $(DFLAGS) $(NODEFAULTLIB) -betterC $(UDFLAGS) -run $(BETTERCTESTS_DIR)/$(subst /,_,$<)
+	$(DMD) $(DFLAGS) $(NODEFAULTLIB) -betterC -unittest -run $(BETTERCTESTS_DIR)/$(subst /,_,$<)
 
 ################################################################################
 
@@ -670,5 +689,8 @@ endif
 
 .PHONY: buildkite-test
 buildkite-test: unittest betterc
+
+.PHONY: autodecode-test
+autodecode-test: $(addsuffix .test,$(NO_AUTODECODE_MODULES))
 
 .DELETE_ON_ERROR: # GNU Make directive (delete output files on error)

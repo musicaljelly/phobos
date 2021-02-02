@@ -3,6 +3,7 @@
 /++
 
 $(SCRIPT inhibitQuickIndex = 1;)
+$(DIVC quickindex,
 $(BOOKTABLE,
 $(TR $(TH Category) $(TH Functions))
 $(TR $(TD Types) $(TD
@@ -23,13 +24,22 @@ $(TR $(TD Conversion) $(TD
     $(LREF SysTimeToSYSTEMTIME)
     $(LREF unixTimeToStdTime)
 ))
-)
+))
 
     License:   $(HTTP www.boost.org/LICENSE_1_0.txt, Boost License 1.0).
     Authors:   $(HTTP jmdavisprog.com, Jonathan M Davis)
     Source:    $(PHOBOSSRC std/datetime/systime.d)
 +/
 module std.datetime.systime;
+
+version (OSX)
+    version = Darwin;
+else version (iOS)
+    version = Darwin;
+else version (TVOS)
+    version = Darwin;
+else version (WatchOS)
+    version = Darwin;
 
 /// Get the current time as a $(LREF SysTime)
 @safe unittest
@@ -76,7 +86,7 @@ import std.datetime.timezone;// : LocalTime, SimpleTimeZone, TimeZone, UTC;
 import std.exception : enforce;
 import std.format : format;
 import std.range.primitives;
-import std.traits : isIntegral, isSigned, isSomeString, Unqual, isNarrowString;
+import std.traits : isIntegral, isSigned, isSomeString, isNarrowString;
 
 version (Windows)
 {
@@ -91,7 +101,7 @@ else version (Posix)
     import core.sys.posix.sys.types : time_t;
 }
 
-version (unittest)
+version (StdUnittest)
 {
     import core.exception : AssertError;
     import std.exception : assertThrown;
@@ -211,7 +221,7 @@ public:
             static import core.stdc.time;
             enum hnsecsToUnixEpoch = unixTimeToStdTime(0);
 
-            version (OSX)
+            version (Darwin)
             {
                 static if (clockType == ClockType.second)
                     return unixTimeToStdTime(core.stdc.time.time(null));
@@ -409,7 +419,7 @@ private:
     To convert a `SysTime` to a $(REF Date,std,datetime,date) or
     $(REF DateTime,std,datetime,date), simply cast it. To convert a
     $(REF Date,std,datetime,date) or $(REF DateTime,std,datetime,date) to a
-    `SysTime`, use `SysTime`'s constructor, and pass in the ntended time
+    `SysTime`, use `SysTime`'s constructor, and pass in the intended time
     zone with it (or don't pass in a $(REF TimeZone,std,datetime,timezone), and
     the local time zone will be used). Be aware, however, that converting from a
     $(REF DateTime,std,datetime,date) to a `SysTime` will not necessarily
@@ -2513,7 +2523,7 @@ public:
 
     version (StdDdoc)
     {
-        private struct timespec {}
+        version (Windows) private struct timespec {}
         /++
             Returns a `timespec` which represents this $(LREF SysTime).
 
@@ -7906,7 +7916,7 @@ public:
         Returns a $(REF Date,std,datetime,date) equivalent to this $(LREF SysTime).
       +/
     Date opCast(T)() @safe const nothrow scope
-        if (is(Unqual!T == Date))
+        if (is(immutable T == immutable Date))
     {
         return Date(dayOfGregorianCal);
     }
@@ -7947,7 +7957,7 @@ public:
         $(LREF SysTime).
       +/
     DateTime opCast(T)() @safe const nothrow scope
-        if (is(Unqual!T == DateTime))
+        if (is(immutable T == immutable DateTime))
     {
         try
         {
@@ -8013,7 +8023,7 @@ public:
         $(LREF SysTime).
       +/
     TimeOfDay opCast(T)() @safe const nothrow scope
-        if (is(Unqual!T == TimeOfDay))
+        if (is(immutable T == immutable TimeOfDay))
     {
         try
         {
@@ -8064,13 +8074,13 @@ public:
     }
 
 
-    // Temporary hack until bug http://d.puremagic.com/issues/show_bug.cgi?id=4867 is fixed.
+    // Temporary hack until bug https://issues.dlang.org/show_bug.cgi?id=4867 is fixed.
     // This allows assignment from const(SysTime) to SysTime.
     // It may be a good idea to keep it though, since casting from a type to itself
     // should be allowed, and it doesn't work without this opCast() since opCast()
     // has already been defined for other types.
     SysTime opCast(T)() @safe const pure nothrow scope
-        if (is(Unqual!T == SysTime))
+        if (is(immutable T == immutable SysTime))
     {
         return SysTime(_stdTime, _timezone);
     }
@@ -8913,11 +8923,11 @@ public:
         // pops up when deprecations are moved along around July 2019. At that
         // time, we will update fromISOString so that it is conformant with ISO
         // 8601, and it will no longer accept ISO extended time zones (it does
-        // currently because of issue #15654 - toISOString used to incorrectly
-        // use the ISO extended time zone format). These tests will then start
-        // failing will need to be updated accordingly. Also, the notes about
-        // this issue in toISOString and fromISOString's documentation will need
-        // to be removed.
+        // currently because of https://issues.dlang.org/show_bug.cgi?id=15654
+        // toISOString used to incorrectly use the ISO extended time zone format).
+        // These tests will then start failing will need to be updated accordingly.
+        // Also, the notes about this issue in toISOString and fromISOString's
+        // documentation will need to be removed.
         test("20101222T172201-01:00", SysTime(DateTime(2010, 12, 22, 17, 22, 01), west60));
         test("20101222T172201-01:30", SysTime(DateTime(2010, 12, 22, 17, 22, 01), west90));
         test("20101222T172201-08:00", SysTime(DateTime(2010, 12, 22, 17, 22, 01), west480));
@@ -8938,7 +8948,7 @@ public:
         }
     }
 
-    // bug# 17801
+    // https://issues.dlang.org/show_bug.cgi?id=17801
     @safe unittest
     {
         import std.conv : to;
@@ -9185,7 +9195,7 @@ public:
         }
     }
 
-    // bug# 17801
+    // https://issues.dlang.org/show_bug.cgi?id=17801
     @safe unittest
     {
         import core.time;
@@ -9436,7 +9446,7 @@ public:
         }
     }
 
-    // bug# 17801
+    // https://issues.dlang.org/show_bug.cgi?id=17801
     @safe unittest
     {
         import core.time;
@@ -10234,7 +10244,7 @@ SysTime parseRFC822DateTime()(scope const char[] value) @safe
 /++ Ditto +/
 SysTime parseRFC822DateTime(R)(scope R value)
 if (isRandomAccessRange!R && hasSlicing!R && hasLength!R &&
-    (is(Unqual!(ElementType!R) == char) || is(Unqual!(ElementType!R) == ubyte)))
+    (is(immutable ElementType!R == immutable char) || is(immutable ElementType!R == immutable ubyte)))
 {
     import std.algorithm.searching : find, all;
     import std.ascii : isDigit, isAlpha, isPrintable;
@@ -10454,7 +10464,7 @@ afterMon: stripAndCheckLen(value[3 .. value.length], "1200:00A".length);
     assertThrown!DateTimeException(parseRFC822DateTime(badStr));
 }
 
-version (unittest) private void testParse822(alias cr)(string str, SysTime expected, size_t line = __LINE__)
+version (StdUnittest) private void testParse822(alias cr)(string str, SysTime expected, size_t line = __LINE__)
 {
     import std.format : format;
     auto value = cr(str);
@@ -10463,7 +10473,7 @@ version (unittest) private void testParse822(alias cr)(string str, SysTime expec
         throw new AssertError(format("wrong result. expected [%s], actual[%s]", expected, result), __FILE__, line);
 }
 
-version (unittest) private void testBadParse822(alias cr)(string str, size_t line = __LINE__)
+version (StdUnittest) private void testBadParse822(alias cr)(string str, size_t line = __LINE__)
 {
     try
         parseRFC822DateTime(cr(str));
@@ -10503,7 +10513,8 @@ version (unittest) private void testBadParse822(alias cr)(string str, size_t lin
                            function(string a){return cast(ubyte[]) a;},
                            function(string a){return a;},
                            function(string a){return map!(b => cast(char) b)(a.representation);}))
-    {(){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
+    {(){ // workaround slow optimizations for large functions
+         // https://issues.dlang.org/show_bug.cgi?id=2396
         scope(failure) writeln(typeof(cr).stringof);
         alias test = testParse822!cr;
         alias testBad = testBadParse822!cr;
@@ -10774,7 +10785,8 @@ version (unittest) private void testBadParse822(alias cr)(string str, size_t lin
                            function(string a){return cast(ubyte[]) a;},
                            function(string a){return a;},
                            function(string a){return map!(b => cast(char) b)(a.representation);}))
-    {(){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
+    {(){ // workaround slow optimizations for large functions
+         // https://issues.dlang.org/show_bug.cgi?id=2396
         scope(failure) writeln(typeof(cr).stringof);
         alias test = testParse822!cr;
         {
@@ -11203,7 +11215,7 @@ if (validTimeUnits(units) &&
   +/
 R _stripCFWS(R)(R range)
 if (isRandomAccessRange!R && hasSlicing!R && hasLength!R &&
-    (is(Unqual!(ElementType!R) == char) || is(Unqual!(ElementType!R) == ubyte)))
+    (is(immutable ElementType!R == immutable char) || is(immutable ElementType!R == immutable ubyte)))
 {
     immutable e = range.length;
     outer: for (size_t i = 0; i < e; )
@@ -11403,7 +11415,7 @@ if (isIntegral!T && isSigned!T) // The constraints on R were already covered by 
 // NOTE: all the non-simple array literals are wrapped in functions, because
 // otherwise importing causes re-evaluation of the static initializers using
 // CTFE with unittests enabled
-version (unittest)
+version (StdUnittest)
 {
 private @safe:
     // Variables to help in testing.

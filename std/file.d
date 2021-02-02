@@ -7,6 +7,7 @@ at a time. For opening files and manipulating them via handles refer
 to module $(MREF std, stdio).
 
 $(SCRIPT inhibitQuickIndex = 1;)
+$(DIVC quickindex,
 $(BOOKTABLE,
 $(TR $(TH Category) $(TH Functions))
 $(TR $(TD General) $(TD
@@ -64,7 +65,7 @@ $(TR $(TD Other) $(TD
           $(LREF SpanMode)
           $(LREF getAvailableDiskSpace)
 ))
-)
+))
 
 
 Copyright: Copyright The D Language Foundation 2007 - 2011.
@@ -91,6 +92,15 @@ import std.meta;
 import std.range.primitives;
 import std.traits;
 import std.typecons;
+
+version (OSX)
+    version = Darwin;
+else version (iOS)
+    version = Darwin;
+else version (TVOS)
+    version = Darwin;
+else version (WatchOS)
+    version = Darwin;
 
 version (Windows)
 {
@@ -131,7 +141,7 @@ else
     return fileName;
 }
 
-version (unittest) private struct TestAliasedString
+version (StdUnittest) private struct TestAliasedString
 {
     string get() @safe @nogc pure nothrow { return _s; }
     alias get this;
@@ -189,7 +199,7 @@ class FileException : Exception
 
     /++
         Constructor which takes the error number ($(LUCKY GetLastError)
-        in Windows, $(D_PARAM errno) in Posix).
+        in Windows, $(D_PARAM errno) in POSIX).
 
         Params:
             name  = Name of file for which the error occurred.
@@ -273,9 +283,9 @@ private T cenforce(T)(T condition, scope const(char)[] name, scope const(FSChar)
     throw new FileException(name, .errno, file, line);
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=17102
 @safe unittest
 {
-    // issue 17102
     try
     {
         cenforce(false, null, null,
@@ -306,7 +316,7 @@ void[] read(R)(R name, size_t upTo = size_t.max)
 if (isInputRange!R && isSomeChar!(ElementEncodingType!R) && !isInfinite!R &&
     !isConvertibleToString!R)
 {
-    static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+    static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         return readImpl(name, name.tempCString!FSChar(), upTo);
     else
         return readImpl(null, name.tempCString!FSChar(), upTo);
@@ -511,7 +521,7 @@ if (isSomeString!S && (isInputRange!R && !isInfinite!R && isSomeChar!(ElementTyp
     immutable bomSeq = getBOM(data);
     immutable bom = bomSeq.schema;
 
-    static if (is(Unqual!(ElementEncodingType!S) == char))
+    static if (is(immutable ElementEncodingType!S == immutable char))
     {
         with(BOM) switch (bom)
         {
@@ -522,7 +532,7 @@ if (isSomeString!S && (isInputRange!R && !isInfinite!R && isSomeChar!(ElementTyp
             default: break;
         }
     }
-    else static if (is(Unqual!(ElementEncodingType!S) == wchar))
+    else static if (is(immutable ElementEncodingType!S == immutable wchar))
     {
         with(BOM) switch (bom)
         {
@@ -731,7 +741,7 @@ void write(R)(R name, const void[] buffer)
 if ((isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) || isSomeString!R) &&
     !isConvertibleToString!R)
 {
-    static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+    static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         writeImpl(name, name.tempCString!FSChar(), buffer, false);
     else
         writeImpl(null, name.tempCString!FSChar(), buffer, false);
@@ -778,7 +788,7 @@ void append(R)(R name, const void[] buffer)
 if ((isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) || isSomeString!R) &&
     !isConvertibleToString!R)
 {
-    static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+    static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         writeImpl(name, name.tempCString!FSChar(), buffer, true);
     else
         writeImpl(null, name.tempCString!FSChar(), buffer, true);
@@ -812,7 +822,7 @@ if (isConvertibleToString!R)
     static assert(__traits(compiles, append(TestAliasedString("foo"), [0, 1, 2, 3])));
 }
 
-// Posix implementation helper for write and append
+// POSIX implementation helper for write and append
 
 version (Posix) private void writeImpl(scope const(char)[] name, scope const(FSChar)* namez,
         scope const(void)[] buffer, bool append) @trusted
@@ -886,11 +896,20 @@ version (Windows) private void writeImpl(scope const(char)[] name, scope const(F
 }
 
 /***************************************************
- * Rename file `from` _to `to`.
+ * Rename file `from` _to `to`, moving it between directories if required.
  * If the target file exists, it is overwritten.
+ *
+ * It is not possible to rename a file across different mount points
+ * or drives. On POSIX, the operation is atomic. That means, if `to`
+ * already exists there will be no time period during the operation
+ * where `to` is missing. See
+ * $(HTTP man7.org/linux/man-pages/man2/rename.2.html, manpage for rename)
+ * for more details.
+ *
  * Params:
  *    from = string or range of characters representing the existing file name
  *    to = string or range of characters representing the target file name
+ *
  * Throws: $(LREF FileException) on error.
  */
 void rename(RF, RT)(RF from, RT to)
@@ -903,12 +922,12 @@ if ((isInputRange!RF && !isInfinite!RF && isSomeChar!(ElementEncodingType!RF) ||
     auto fromz = from.tempCString!FSChar();
     auto toz = to.tempCString!FSChar();
 
-    static if (isNarrowString!RF && is(Unqual!(ElementEncodingType!RF) == char))
+    static if (isNarrowString!RF && is(immutable ElementEncodingType!RF == immutable char))
         alias f = from;
     else
         enum string f = null;
 
-    static if (isNarrowString!RT && is(Unqual!(ElementEncodingType!RT) == char))
+    static if (isNarrowString!RT && is(immutable ElementEncodingType!RT == immutable char))
         alias t = to;
     else
         enum string t = null;
@@ -1009,7 +1028,7 @@ void remove(R)(R name)
 if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
     !isConvertibleToString!R)
 {
-    static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+    static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         removeImpl(name, name.tempCString!FSChar());
     else
         removeImpl(null, name.tempCString!FSChar());
@@ -1067,7 +1086,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R))
 
     WIN32_FILE_ATTRIBUTE_DATA fad = void;
 
-    static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+    static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
     {
         static void getFA(scope const(char)[] name, scope const(FSChar)* namez,
                           out WIN32_FILE_ATTRIBUTE_DATA fad) @trusted
@@ -1129,7 +1148,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
         {
             return stat(namez, &buf);
         }
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias names = name;
         else
             string names = null;
@@ -1236,7 +1255,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
         }
         stat_t statbuf = void;
 
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias names = name;
         else
             string names = null;
@@ -1347,7 +1366,7 @@ version (StdDdoc)
      Get creation/access/modified times of file `name`.
 
      This is the same as `getTimes` except that it also gives you the file
-     creation time - which isn't possible on Posix systems.
+     creation time - which isn't possible on POSIX systems.
 
      Params:
      name                 = File _name to get times for.
@@ -1464,6 +1483,20 @@ version (Windows) @system unittest
     }
 }
 
+version (Darwin)
+private
+{
+    import core.stdc.config : c_ulong;
+    enum ATTR_CMN_MODTIME  = 0x00000400, ATTR_CMN_ACCTIME  = 0x00001000;
+    alias attrgroup_t = uint;
+    static struct attrlist
+    {
+        ushort bitmapcount, reserved;
+        attrgroup_t commonattr, volattr, dirattr, fileattr, forkattr;
+    }
+    extern(C) int setattrlist(in char* path, scope ref attrlist attrs,
+        scope void* attrbuf, size_t attrBufSize, c_ulong options) nothrow @nogc @system;
+}
 
 /++
     Set access/modified times of file or folder `name`.
@@ -1482,93 +1515,12 @@ void setTimes(R)(R name,
 if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
     !isConvertibleToString!R)
 {
-    version (Windows)
-    {
-        import std.datetime.systime : SysTimeToFILETIME;
-
-        auto namez = name.tempCString!FSChar();
-        static auto trustedCreateFileW(const(FSChar)* namez, DWORD dwDesiredAccess, DWORD dwShareMode,
-                                       SECURITY_ATTRIBUTES *lpSecurityAttributes, DWORD dwCreationDisposition,
-                                       DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) @trusted
-        {
-            return CreateFileW(namez, dwDesiredAccess, dwShareMode,
-                               lpSecurityAttributes, dwCreationDisposition,
-                               dwFlagsAndAttributes, hTemplateFile);
-
-        }
-        static auto trustedCloseHandle(HANDLE hObject) @trusted
-        {
-            return CloseHandle(hObject);
-        }
-        static auto trustedSetFileTime(HANDLE hFile, const scope FILETIME *lpCreationTime,
-                                       const scope ref FILETIME lpLastAccessTime,
-                                       const scope ref FILETIME lpLastWriteTime) @trusted
-        {
-            return SetFileTime(hFile, lpCreationTime, &lpLastAccessTime, &lpLastWriteTime);
-        }
-
-        const ta = SysTimeToFILETIME(accessTime);
-        const tm = SysTimeToFILETIME(modificationTime);
-        alias defaults =
-            AliasSeq!(GENERIC_WRITE,
-                      0,
-                      null,
-                      OPEN_EXISTING,
-                      FILE_ATTRIBUTE_NORMAL |
-                      FILE_ATTRIBUTE_DIRECTORY |
-                      FILE_FLAG_BACKUP_SEMANTICS,
-                      HANDLE.init);
-        auto h = trustedCreateFileW(namez, defaults);
-
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
-            alias names = name;
-        else
-            string names = null;
-        cenforce(h != INVALID_HANDLE_VALUE, names, namez);
-
-        scope(exit)
-            cenforce(trustedCloseHandle(h), names, namez);
-
-        cenforce(trustedSetFileTime(h, null, ta, tm), names, namez);
-    }
-    else version (Posix)
-    {
-        auto namez = name.tempCString!FSChar();
-        static if (is(typeof(&utimensat)))
-        {
-            static auto trustedUtimensat(int fd, const(FSChar)* namez, const ref timespec[2] times, int flags) @trusted
-            {
-                return utimensat(fd, namez, times, flags);
-            }
-            timespec[2] t = void;
-
-            t[0] = accessTime.toTimeSpec();
-            t[1] = modificationTime.toTimeSpec();
-
-            static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
-                alias names = name;
-            else
-                string names = null;
-            cenforce(trustedUtimensat(AT_FDCWD, namez, t, 0) == 0, names, namez);
-        }
-        else
-        {
-            static auto trustedUtimes(const(FSChar)* namez, const ref timeval[2] times) @trusted
-            {
-                return utimes(namez, times);
-            }
-            timeval[2] t = void;
-
-            t[0] = accessTime.toTimeVal();
-            t[1] = modificationTime.toTimeVal();
-
-            static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
-                alias names = name;
-            else
-                string names = null;
-            cenforce(trustedUtimes(namez, t) == 0, names, namez);
-        }
-    }
+    auto namez = name.tempCString!FSChar();
+    static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
+        alias names = name;
+    else
+        string names = null;
+    setTimesImpl(names, namez, accessTime, modificationTime);
 }
 
 ///
@@ -1597,6 +1549,65 @@ void setTimes(R)(auto ref R name,
 if (isConvertibleToString!R)
 {
     setTimes!(StringTypeOf!R)(name, accessTime, modificationTime);
+}
+
+private void setTimesImpl(scope const(char)[] names, scope const(FSChar)* namez,
+    SysTime accessTime, SysTime modificationTime) @trusted
+{
+    version (Windows)
+    {
+        import std.datetime.systime : SysTimeToFILETIME;
+        const ta = SysTimeToFILETIME(accessTime);
+        const tm = SysTimeToFILETIME(modificationTime);
+        alias defaults =
+            AliasSeq!(GENERIC_WRITE,
+                      0,
+                      null,
+                      OPEN_EXISTING,
+                      FILE_ATTRIBUTE_NORMAL |
+                      FILE_ATTRIBUTE_DIRECTORY |
+                      FILE_FLAG_BACKUP_SEMANTICS,
+                      HANDLE.init);
+        auto h = CreateFileW(namez, defaults);
+
+        cenforce(h != INVALID_HANDLE_VALUE, names, namez);
+
+        scope(exit)
+            cenforce(CloseHandle(h), names, namez);
+
+        cenforce(SetFileTime(h, null, &ta, &tm), names, namez);
+    }
+    else
+    {
+        static if (is(typeof(&utimensat)))
+        {
+            timespec[2] t = void;
+            t[0] = accessTime.toTimeSpec();
+            t[1] = modificationTime.toTimeSpec();
+            cenforce(utimensat(AT_FDCWD, namez, t, 0) == 0, names, namez);
+        }
+        else
+        {
+            version (Darwin)
+            {
+                // Set modification & access times with setattrlist to avoid precision loss.
+                attrlist attrs = { bitmapcount: 5, reserved: 0,
+                        commonattr: ATTR_CMN_MODTIME | ATTR_CMN_ACCTIME,
+                        volattr: 0, dirattr: 0, fileattr: 0, forkattr: 0 };
+                timespec[2] attrbuf = [modificationTime.toTimeSpec(), accessTime.toTimeSpec()];
+                if (0 == setattrlist(namez, attrs, &attrbuf, attrbuf.sizeof, 0))
+                    return;
+                if (.errno != ENOTSUP)
+                    cenforce(false, names, namez);
+                // Not all volumes support setattrlist. In such cases
+                // fall through to the utimes implementation.
+            }
+            timeval[2] t = void;
+            t[0] = accessTime.toTimeVal();
+            t[1] = modificationTime.toTimeVal();
+            cenforce(utimes(namez, t) == 0, names, namez);
+        }
+    }
 }
 
 @safe unittest
@@ -1670,7 +1681,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
         }
         stat_t statbuf = void;
 
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias names = name;
         else
             string names = null;
@@ -1787,7 +1798,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R))
 version (StdDdoc)
 {
     /++
-     $(BLUE This function is Posix-Only.)
+     $(BLUE This function is POSIX-Only.)
 
      Returns the time that the given file was last modified.
      Params:
@@ -1795,7 +1806,7 @@ version (StdDdoc)
      +/
     SysTime timeLastModified()(auto ref stat_t statbuf) pure nothrow {assert(false);}
     /++
-     $(BLUE This function is Posix-Only.)
+     $(BLUE This function is POSIX-Only.)
 
      Returns the time that the given file was last accessed.
      Params:
@@ -1803,7 +1814,7 @@ version (StdDdoc)
      +/
     SysTime timeLastAccessed()(auto ref stat_t statbuf) pure nothrow {assert(false);}
     /++
-     $(BLUE This function is Posix-Only.)
+     $(BLUE This function is POSIX-Only.)
 
      Returns the time that the given file was last changed.
      Params:
@@ -1862,6 +1873,15 @@ else version (Posix)
 //   vfs.timestamp_precision sysctl to a value greater than zero.
 // - OS X, where the native filesystem (HFS+) stores filesystem
 //   timestamps with 1-second precision.
+//
+// Note: on linux systems, although in theory a change to a file date
+// can be tracked with precision of 4 msecs, this test waits 20 msecs
+// to prevent possible problems relative to the CI services the dlang uses,
+// as they may have the HZ setting that controls the software clock set to 100
+// (instead of the more common 250).
+// see https://man7.org/linux/man-pages/man7/time.7.html
+//     https://stackoverflow.com/a/14393315,
+//     https://issues.dlang.org/show_bug.cgi?id=21148
 version (FreeBSD) {} else
 version (DragonFlyBSD) {} else
 version (OSX) {} else
@@ -1880,7 +1900,7 @@ version (OSX) {} else
         remove(deleteme);
         assert(time != lastTime);
         lastTime = time;
-        Thread.sleep(10.msecs);
+        Thread.sleep(20.msecs);
     }
 }
 
@@ -1966,7 +1986,8 @@ private bool existsImpl(const(FSChar)* namez) @trusted nothrow @nogc
     assert(deleteme.exists);
 }
 
-@safe unittest // Bugzilla 16573
+// https://issues.dlang.org/show_bug.cgi?id=16573
+@safe unittest
 {
     enum S : string { foo = "foo" }
     assert(__traits(compiles, S.foo.exists));
@@ -1975,15 +1996,15 @@ private bool existsImpl(const(FSChar)* namez) @trusted nothrow @nogc
 /++
  Returns the attributes of the given file.
 
- Note that the file attributes on Windows and Posix systems are
+ Note that the file attributes on Windows and POSIX systems are
  completely different. On Windows, they're what is returned by
  $(HTTP msdn.microsoft.com/en-us/library/aa364944(v=vs.85).aspx,
- GetFileAttributes), whereas on Posix systems, they're the
+ GetFileAttributes), whereas on POSIX systems, they're the
  `st_mode` value which is part of the $(D stat struct) gotten by
  calling the $(HTTP en.wikipedia.org/wiki/Stat_%28Unix%29, `stat`)
  function.
 
- On Posix systems, if the given file is a symbolic link, then
+ On POSIX systems, if the given file is a symbolic link, then
  attributes are the attributes of the file pointed to by the symbolic
  link.
 
@@ -2006,7 +2027,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
         }
         immutable result = trustedGetFileAttributesW(namez);
 
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias names = name;
         else
             string names = null;
@@ -2023,7 +2044,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
         }
         stat_t statbuf = void;
 
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias names = name;
         else
             string names = null;
@@ -2114,7 +2135,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
             return lstat(namez, &buf);
         }
         stat_t lstatbuf = void;
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias names = name;
         else
             string names = null;
@@ -2196,6 +2217,10 @@ if (isConvertibleToString!R)
 /++
     Set the _attributes of the given file.
 
+    For example, a programmatic equivalent of Unix's `chmod +x name`
+    to make a file executable is
+    `name.setAttributes(name.getAttributes | octal!700)`.
+
     Params:
         name = the file _name
         attributes = the _attributes to set the file to
@@ -2214,7 +2239,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
         {
             return SetFileAttributesW(namez, dwFileAttributes);
         }
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias names = name;
         else
             string names = null;
@@ -2228,7 +2253,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
             return chmod(namez, mode);
         }
         assert(attributes <= mode_t.max);
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias names = name;
         else
             string names = null;
@@ -2474,8 +2499,8 @@ bool attrIsDir(uint attributes) @safe pure nothrow @nogc
     On Windows, if a file is not a directory, then it's a file. So,
     either `isFile` or `isDir` will return true for any given file.
 
-    On Posix systems, if `isFile` is `true`, that indicates that the file
-    is a regular file (e.g. not a block not device). So, on Posix systems, it's
+    On POSIX systems, if `isFile` is `true`, that indicates that the file
+    is a regular file (e.g. not a block not device). So, on POSIX systems, it's
     possible for both `isFile` and `isDir` to be `false` for a
     particular file (in which case, it's a special file). You can use
     `getAttributes` to get the attributes to figure out what type of special
@@ -2528,7 +2553,8 @@ if (isConvertibleToString!R)
     assert(f.isFile);
 }
 
-@system unittest // bugzilla 15658
+// https://issues.dlang.org/show_bug.cgi?id=15658
+@system unittest
 {
     DirEntry e = DirEntry(".");
     static assert(is(typeof(isFile(e))));
@@ -2567,8 +2593,8 @@ if (isConvertibleToString!R)
     `attrIsFile` or `attrIsDir` will return `true` for the
     _attributes of any given file.
 
-    On Posix systems, if `attrIsFile` is `true`, that indicates that the
-    file is a regular file (e.g. not a block not device). So, on Posix systems,
+    On POSIX systems, if `attrIsFile` is `true`, that indicates that the
+    file is a regular file (e.g. not a block not device). So, on POSIX systems,
     it's possible for both `attrIsFile` and `attrIsDir` to be `false`
     for a particular file (in which case, it's a special file). If a file is a
     special file, you can use the _attributes to check what type of special file
@@ -2841,7 +2867,7 @@ bool attrIsSymlink(uint attributes) @safe pure nothrow @nogc
 
 /**
 Change directory to `pathname`. Equivalent to `cd` on
-Windows and Posix.
+Windows and POSIX.
 
 Params:
     pathname = the directory to step into
@@ -2869,7 +2895,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
             return core.sys.posix.unistd.chdir(pathz) == 0;
         }
     }
-    static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+    static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         alias pathStr = pathname;
     else
         string pathStr = null;
@@ -2914,7 +2940,7 @@ Params:
     pathname = the path of the directory to make
 
 Throws:
-    $(LREF FileException) on Posix or $(LREF WindowsException) on Windows
+    $(LREF FileException) on POSIX or $(LREF WindowsException) on Windows
     if an error occured.
  */
 void mkdir(R)(R pathname)
@@ -2930,7 +2956,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
         {
             return CreateDirectoryW(pathz, null);
         }
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias pathStr = pathname;
         else
             string pathStr = null;
@@ -2944,7 +2970,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
         {
             return core.sys.posix.sys.stat.mkdir(pathz, mode);
         }
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias pathStr = pathname;
         else
             string pathStr = null;
@@ -3094,7 +3120,7 @@ void mkdirRecurse(scope const(char)[] pathname) @safe
         assertThrown!FileException(mkdirRecurse(`1:\foobar`));
     }
 
-    // bug3570
+    // https://issues.dlang.org/show_bug.cgi?id=3570
     {
         immutable basepath = deleteme ~ "_dir";
         version (Windows)
@@ -3142,7 +3168,7 @@ if (isInputRange!R && !isInfinite!R && isSomeChar!(ElementEncodingType!R) &&
             return core.sys.posix.unistd.rmdir(pathz) == 0;
         }
     }
-    static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+    static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
         alias pathStr = pathname;
     else
         string pathStr = null;
@@ -3173,7 +3199,7 @@ if (isConvertibleToString!R)
 }
 
 /++
-    $(BLUE This function is Posix-Only.)
+    $(BLUE This function is POSIX-Only.)
 
     Creates a symbolic _link (_symlink).
 
@@ -3267,7 +3293,7 @@ version (Posix) @safe unittest
 
 
 /++
-    $(BLUE This function is Posix-Only.)
+    $(BLUE This function is POSIX-Only.)
 
     Returns the path to the file pointed to by a symlink. Note that the
     path could be either relative or absolute depending on the symlink.
@@ -3364,7 +3390,7 @@ version (Posix) @system unittest // input range of dchars
     import std.utf : byChar;
     immutable string link = deleteme ~ "/l";
     symlink("f", link);
-    InputRange!dchar linkr = inputRangeObject(link);
+    InputRange!(ElementType!string) linkr = inputRangeObject(link);
     alias R = typeof(linkr);
     static assert(isInputRange!R);
     static assert(!isForwardRange!R);
@@ -3387,7 +3413,7 @@ version (Windows) string getcwd() @trusted
         3. the buffer (lpBuffer) is not large enough: the required size of
     the buffer, in characters, including the null-terminating character.
     */
-    version (unittest)
+    version (StdUnittest)
         enum BUF_SIZE = 10;     // trigger reallocation code
     else
         enum BUF_SIZE = 4096;   // enough for most common case
@@ -3434,14 +3460,30 @@ else version (Posix) string getcwd() @trusted
     assert(s.length);
 }
 
-version (OSX)
+version (Darwin)
     private extern (C) int _NSGetExecutablePath(char* buf, uint* bufsize);
 else version (FreeBSD)
+    private extern (C) int sysctl (const int* name, uint namelen, void* oldp,
+        size_t* oldlenp, const void* newp, size_t newlen);
+else version (DragonFlyBSD)
     private extern (C) int sysctl (const int* name, uint namelen, void* oldp,
         size_t* oldlenp, const void* newp, size_t newlen);
 else version (NetBSD)
     private extern (C) int sysctl (const int* name, uint namelen, void* oldp,
         size_t* oldlenp, const void* newp, size_t newlen);
+
+version (FreeBSD)
+{
+    version = thisExePathHasSysCtlProcName;
+}
+else version (NetBSD)
+{
+    version = thisExePathHasSysCtlProcName;
+}
+else version (DragonFlyBSD)
+{
+    version = thisExePathHasSysCtlProcName;
+}
 
 /**
  * Returns the full path of the current executable.
@@ -3454,7 +3496,7 @@ else version (NetBSD)
  */
 @trusted string thisExePath()
 {
-    version (OSX)
+    version (Darwin)
     {
         import core.sys.posix.stdlib : realpath;
         import std.conv : to;
@@ -3498,17 +3540,45 @@ else version (NetBSD)
             buffer.length *= 2;
         }
     }
-    else version (FreeBSD)
+    else version (thisExePathHasSysCtlProcName)
     {
         import std.exception : errnoEnforce, assumeUnique;
         enum
         {
             CTL_KERN = 1,
-            KERN_PROC = 14,
-            KERN_PROC_PATHNAME = 12
+            KERN_PROC = 14
         }
 
-        int[4] mib = [CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1];
+        version (NetBSD)
+        {
+            enum
+            {
+                KERN_PROC_ARGS = 48,
+                KERN_PROC_PATHNAME = 5
+            }
+
+            int[4] mib = [CTL_KERN, KERN_PROC_ARGS, -1, KERN_PROC_PATHNAME];
+        }
+        else
+        {
+            version (FreeBSD)
+            {
+                enum
+                {
+                    KERN_PROC_PATHNAME = 12
+                }
+            }
+            else
+            {
+                enum
+                {
+                    KERN_PROC_PATHNAME = 9
+                }
+            }
+
+            int[4] mib = [CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1];
+        }
+
         size_t len;
 
         auto result = sysctl(mib.ptr, mib.length, null, &len, null, 0); // get the length of the path
@@ -3519,14 +3589,6 @@ else version (NetBSD)
         errnoEnforce(result == 0);
 
         return buffer.assumeUnique;
-    }
-    else version (NetBSD)
-    {
-        return readLink("/proc/self/exe");
-    }
-    else version (DragonFlyBSD)
-    {
-        return readLink("/proc/curproc/file");
     }
     else version (Solaris)
     {
@@ -3554,7 +3616,7 @@ else version (NetBSD)
 version (StdDdoc)
 {
     /++
-        Info on a file, similar to what you'd get from stat on a Posix system.
+        Info on a file, similar to what you'd get from stat on a POSIX system.
       +/
     struct DirEntry
     {
@@ -3616,9 +3678,9 @@ assert(de2.isDir);
             On Windows, if a file is not a directory, then it's a file. So,
             either `isFile` or `isDir` will return `true`.
 
-            On Posix systems, if `isFile` is `true`, that indicates that
+            On POSIX systems, if `isFile` is `true`, that indicates that
             the file is a regular file (e.g. not a block not device). So, on
-            Posix systems, it's possible for both `isFile` and `isDir` to
+            POSIX systems, it's possible for both `isFile` and `isDir` to
             be `false` for a particular file (in which case, it's a special
             file). You can use `attributes` or `statBuf` to get more
             information about a special file (see the stat man page for more
@@ -3676,7 +3738,7 @@ assert(!de2.isFile);
         @property SysTime timeLastModified();
 
         /++
-            $(BLUE This function is Posix-Only.)
+            $(BLUE This function is POSIX-Only.)
 
             Returns the time that the file represented by this `DirEntry` was
             last changed (not only in contents, but also in permissions or ownership).
@@ -3686,21 +3748,21 @@ assert(!de2.isFile);
         /++
             Returns the _attributes of the file represented by this `DirEntry`.
 
-            Note that the file _attributes on Windows and Posix systems are
+            Note that the file _attributes on Windows and POSIX systems are
             completely different. On, Windows, they're what is returned by
             `GetFileAttributes`
             $(HTTP msdn.microsoft.com/en-us/library/aa364944(v=vs.85).aspx, GetFileAttributes)
-            Whereas, an Posix systems, they're the `st_mode` value which is
+            Whereas, an POSIX systems, they're the `st_mode` value which is
             part of the `stat` struct gotten by calling `stat`.
 
-            On Posix systems, if the file represented by this `DirEntry` is a
+            On POSIX systems, if the file represented by this `DirEntry` is a
             symbolic link, then _attributes are the _attributes of the file
             pointed to by the symbolic link.
           +/
         @property uint attributes();
 
         /++
-            On Posix systems, if the file represented by this `DirEntry` is a
+            On POSIX systems, if the file represented by this `DirEntry` is a
             symbolic link, then `linkAttributes` are the attributes of the
             symbolic link itself. Otherwise, `linkAttributes` is identical to
             `attributes`.
@@ -3715,7 +3777,7 @@ assert(!de2.isFile);
             alias stat_t = void*;
 
         /++
-            $(BLUE This function is Posix-Only.)
+            $(BLUE This function is POSIX-Only.)
 
             The `stat` struct gotten from calling `stat`.
           +/
@@ -4095,7 +4157,7 @@ else version (Posix)
             core.sys.posix.unistd.symlink((deleteme ~ "_broken_symlink\0").ptr, symfile.ptr);
 
             {
-                //Issue 8298
+                // https://issues.dlang.org/show_bug.cgi?id=8298
                 DirEntry de = DirEntry(symfile);
 
                 assert(!de.isFile);
@@ -4159,12 +4221,12 @@ if (isInputRange!RF && !isInfinite!RF && isSomeChar!(ElementEncodingType!RF) && 
     auto fromz = from.tempCString!FSChar();
     auto toz = to.tempCString!FSChar();
 
-    static if (isNarrowString!RF && is(Unqual!(ElementEncodingType!RF) == char))
+    static if (isNarrowString!RF && is(immutable ElementEncodingType!RF == immutable char))
         alias f = from;
     else
         enum string f = null;
 
-    static if (isNarrowString!RT && is(Unqual!(ElementEncodingType!RT) == char))
+    static if (isNarrowString!RT && is(immutable ElementEncodingType!RT == immutable char))
         alias t = to;
     else
         enum string t = null;
@@ -4202,7 +4264,8 @@ if (isConvertibleToString!RF || isConvertibleToString!RT)
     assert(targetNonExistent.readText == "source");
 }
 
-@safe unittest // issue 15319
+// https://issues.dlang.org/show_bug.cgi?id=15319
+@safe unittest
 {
     assert(__traits(compiles, copy("from.txt", "to.txt")));
 }
@@ -4294,17 +4357,14 @@ private void copyImpl(scope const(char)[] f, scope const(char)[] t,
 
         cenforce(core.sys.posix.unistd.close(fdw) != -1, f, fromz);
 
-        utimbuf utim = void;
-        utim.actime = cast(time_t) statbufr.st_atime;
-        utim.modtime = cast(time_t) statbufr.st_mtime;
-
-        cenforce(utime(toz, &utim) != -1, f, fromz);
+        setTimesImpl(t, toz, statbufr.statTimeToStdTime!'a', statbufr.statTimeToStdTime!'m');
     }
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=14817
 @safe unittest
 {
-    import std.algorithm, std.file; // issue 14817
+    import std.algorithm, std.file;
     auto t1 = deleteme, t2 = deleteme~"2";
     scope(exit) foreach (t; [t1, t2]) if (t.exists) t.remove();
     write(t1, "11");
@@ -4317,9 +4377,18 @@ private void copyImpl(scope const(char)[] f, scope const(char)[] t,
     import std.utf : byChar;
     copy(t1.byChar, t2.byChar);
     assert(readText(t2.byChar) == "2");
+
+// https://issues.dlang.org/show_bug.cgi?id=20370
+    version (Windows)
+        assert(t1.timeLastModified == t2.timeLastModified);
+    else static if (is(typeof(&utimensat)) || is(typeof(&setattrlist)))
+        assert(t1.timeLastModified == t2.timeLastModified);
+    else
+        assert(abs(t1.timeLastModified - t2.timeLastModified) < dur!"usecs"(1));
 }
 
-@safe version (Posix) @safe unittest //issue 11434
+// https://issues.dlang.org/show_bug.cgi?id=11434
+@safe version (Posix) @safe unittest
 {
     import std.conv : octal;
     auto t1 = deleteme, t2 = deleteme~"2";
@@ -4331,7 +4400,8 @@ private void copyImpl(scope const(char)[] f, scope const(char)[] t,
     assert(getAttributes(t2) == octal!100767);
 }
 
-@safe unittest // issue 15865
+// https://issues.dlang.org/show_bug.cgi?id=15865
+@safe unittest
 {
     import std.exception : assertThrown;
     auto t = deleteme;
@@ -4341,7 +4411,7 @@ private void copyImpl(scope const(char)[] f, scope const(char)[] t,
     assert(readText(t) == "a");
 }
 
-// issue 19834
+// https://issues.dlang.org/show_bug.cgi?id=19834
 version (Windows) @safe unittest
 {
     import std.exception : collectException;
@@ -4436,7 +4506,7 @@ version (Windows) @system unittest
 version (Posix) @system unittest
 {
     import std.exception : enforce, collectException;
-    import std.process : executeShell;
+
     collectException(rmdirRecurse(deleteme));
     auto d = deleteme~"/a/b/c/d/e/f/g";
     enforce(collectException(mkdir(d)));
@@ -4450,9 +4520,8 @@ version (Posix) @system unittest
 
     d = deleteme~"/a/b/c/d/e/f/g";
     mkdirRecurse(d);
-    version (Android) string link_cmd = "ln -s ";
-    else string link_cmd = "ln -sf ";
-    executeShell(link_cmd~deleteme~"/a/b/c "~deleteme~"/link");
+    const linkTarget = deleteme ~ "/link";
+    symlink(deleteme ~ "/a/b/c", linkTarget);
     rmdirRecurse(deleteme);
     enforce(!exists(deleteme));
 }
@@ -4708,7 +4777,7 @@ private struct DirIteratorImpl
         _mode = mode;
         _followSymlink = followSymlink;
 
-        static if (isNarrowString!R && is(Unqual!(ElementEncodingType!R) == char))
+        static if (isNarrowString!R && is(immutable ElementEncodingType!R == immutable char))
             alias pathnameStr = pathname;
         else
         {
@@ -4786,7 +4855,7 @@ struct DirIterator
 {
 @safe:
 private:
-    RefCounted!(DirIteratorImpl, RefCountedAutoInitialize.no) impl = void;
+    RefCounted!(DirIteratorImpl, RefCountedAutoInitialize.no) impl;
     this(string pathname, SpanMode mode, bool followSymlink) @trusted
     {
         impl = typeof(impl)(pathname, mode, followSymlink);
@@ -4918,7 +4987,7 @@ auto dirEntries(string path, SpanMode mode, bool followSymlink = true)
                                    // called from a shared library on Android,
                                    // ie an apk
     else
-        string testdir = "deleteme.dmd.unittest.std.file" ~ to!string(thisProcessID); // needs to be relative
+        string testdir = tempDir.buildPath("deleteme.dmd.unittest.std.file" ~ to!string(thisProcessID));
     mkdirRecurse(buildPath(testdir, "somedir"));
     scope(exit) rmdirRecurse(testdir);
     write(buildPath(testdir, "somefile"), null);
@@ -4952,7 +5021,7 @@ auto dirEntries(string path, SpanMode mode, bool followSymlink = true)
         assert(e.isFile || e.isDir, e.name);
     }
 
-    //issue 7264
+    // https://issues.dlang.org/show_bug.cgi?id=7264
     foreach (string name; dirEntries(testdir, "*.d", SpanMode.breadth))
     {
 
@@ -4961,14 +5030,14 @@ auto dirEntries(string path, SpanMode mode, bool followSymlink = true)
     {
         static assert(is(typeof(entry) == DirEntry));
     }
-    //issue 7138
+    // https://issues.dlang.org/show_bug.cgi?id=7138
     auto a = array(dirEntries(testdir, SpanMode.shallow));
 
-    // issue 11392
+    // https://issues.dlang.org/show_bug.cgi?id=11392
     auto dFiles = dirEntries(testdir, SpanMode.shallow);
     foreach (d; dFiles){}
 
-    // issue 15146
+    // https://issues.dlang.org/show_bug.cgi?id=15146
     dirEntries("", SpanMode.shallow).walkLength();
 }
 
@@ -5059,7 +5128,8 @@ auto dirEntries(string path, string pattern, SpanMode mode,
     }
 }
 
-// Bugzilla 17962 - Make sure that dirEntries does not butcher Unicode file names.
+// Make sure that dirEntries does not butcher Unicode file names
+// https://issues.dlang.org/show_bug.cgi?id=17962
 @system unittest
 {
     import std.algorithm.comparison : equal;
@@ -5086,6 +5156,12 @@ auto dirEntries(string path, string pattern, SpanMode mode,
     assert(equal(files, result));
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=21250
+@system unittest
+{
+    import std.exception : assertThrown;
+    assertThrown!Exception(dirEntries("237f5babd6de21f40915826699582e36", "*.bin", SpanMode.depth));
+}
 
 /**
  * Reads a file line by line and parses the line into a single value or a
@@ -5258,10 +5334,10 @@ string tempDir() @trusted
 
 /**
 Returns the available disk space based on a given path.
-On Windows, `path` must be a directory; on Posix systems, it can be a file or directory.
+On Windows, `path` must be a directory; on POSIX systems, it can be a file or directory.
 
 Params:
-    path = on Windows, it must be a directory; on Posix it can be a file or directory
+    path = on Windows, it must be a directory; on POSIX it can be a file or directory
 Returns:
     Available space in bytes
 

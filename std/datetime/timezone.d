@@ -3,6 +3,7 @@
 /++
 
 $(SCRIPT inhibitQuickIndex = 1;)
+$(DIVC quickindex,
 $(BOOKTABLE,
 $(TR $(TH Category) $(TH Functions))
 $(TR $(TD Time zones) $(TD
@@ -19,7 +20,7 @@ $(TR $(TD Utilities) $(TD
     $(LREF setTZEnvVar)
     $(LREF TZConversions)
 ))
-)
+))
 
     License:   $(HTTP www.boost.org/LICENSE_1_0.txt, Boost License 1.0).
     Authors:   $(HTTP jmdavisprog.com, Jonathan M Davis)
@@ -30,7 +31,16 @@ module std.datetime.timezone;
 import core.time : abs, convert, dur, Duration, hours, minutes;
 import std.datetime.systime : Clock, stdTimeToUnixTime, SysTime;
 import std.range.primitives : back, empty, front, isOutputRange, popFront;
-import std.traits : isIntegral, isSomeString, Unqual;
+import std.traits : isIntegral, isSomeString;
+
+version (OSX)
+    version = Darwin;
+else version (iOS)
+    version = Darwin;
+else version (TVOS)
+    version = Darwin;
+else version (WatchOS)
+    version = Darwin;
 
 version (Windows)
 {
@@ -51,7 +61,7 @@ else version (Posix)
     import core.sys.posix.sys.types : time_t;
 }
 
-version (unittest) import std.exception : assertThrown;
+version (StdUnittest) import std.exception : assertThrown;
 
 
 /++
@@ -325,7 +335,7 @@ public:
             else version (NetBSD)        enum utcZone = "UTC";
             else version (DragonFlyBSD)  enum utcZone = "UTC";
             else version (linux)         enum utcZone = "UTC";
-            else version (OSX)           enum utcZone = "UTC";
+            else version (Darwin)        enum utcZone = "UTC";
             else version (Solaris)       enum utcZone = "UTC";
             else static assert(0, "The location of the UTC timezone file on this Posix platform must be set.");
 
@@ -440,7 +450,7 @@ public:
             bool first = true;
             auto springSwitch = SysTime(dstSwitches[i][0] + dur!"hours"(spring), UTC()) - stdOffset;
             auto fallSwitch = SysTime(dstSwitches[i][1] + dur!"hours"(fall), UTC()) - dstOffset;
-            // @@@BUG@@@ 3659 makes this necessary.
+            // https://issues.dlang.org/show_bug.cgi?id=3659 makes this necessary.
             auto fallSwitchMinus1 = fallSwitch - dur!"hours"(1);
 
             foreach (hour; -24 .. 25)
@@ -586,7 +596,7 @@ public:
             GetTimeZoneInformation(&tzInfo);
 
             // Cannot use to!string() like this should, probably due to bug
-            // http://d.puremagic.com/issues/show_bug.cgi?id=5016
+            // https://issues.dlang.org/show_bug.cgi?id=5016
             //return to!string(tzInfo.StandardName);
 
             wchar[32] str;
@@ -671,7 +681,7 @@ public:
             GetTimeZoneInformation(&tzInfo);
 
             // Cannot use to!string() like this should, probably due to bug
-            // http://d.puremagic.com/issues/show_bug.cgi?id=5016
+            // https://issues.dlang.org/show_bug.cgi?id=5016
             //return to!string(tzInfo.DaylightName);
 
             wchar[32] str;
@@ -1029,7 +1039,7 @@ public:
                 bool first = true;
                 auto springSwitch = SysTime(tzInfos[i][1] + dur!"hours"(spring), UTC()) - stdOffset;
                 auto fallSwitch = SysTime(tzInfos[i][2] + dur!"hours"(fall), UTC()) - dstOffset;
-                // @@@BUG@@@ 3659 makes this necessary.
+                // https://issues.dlang.org/show_bug.cgi?id=3659 makes this necessary.
                 auto fallSwitchMinus1 = fallSwitch - dur!"hours"(1);
 
                 foreach (hour; -24 .. 25)
@@ -1959,7 +1969,7 @@ public:
       +/
     override long tzToUTC(long adjTime) @safe const nothrow
     {
-        assert(!_transitions.empty);
+        assert(!_transitions.empty, "UTC offset's not available");
 
         immutable leapSecs = calculateLeapSeconds(adjTime);
         time_t unixTime = stdTimeToUnixTime(adjTime);
@@ -2623,7 +2633,7 @@ private:
         Reads an int from a TZ file.
       +/
     static T readVal(T)(ref File tzFile) @trusted
-        if ((isIntegral!T || isSomeChar!T) || is(Unqual!T == bool))
+        if ((isIntegral!T || isSomeChar!T) || is(immutable T == immutable bool))
     {
         import std.bitmanip : bigEndianToNative;
         T[1] buff;
@@ -2991,7 +3001,8 @@ else version (Windows)
 
                 scope tziVal = tzKey.getValue("TZI");
                 auto binVal = tziVal.value_BINARY;
-                assert(binVal.length == REG_TZI_FORMAT.sizeof);
+                assert(binVal.length == REG_TZI_FORMAT.sizeof,
+                        "Unexpected size while getTimeZone with name " ~ name);
                 auto tziFmt = cast(REG_TZI_FORMAT*) binVal.ptr;
 
                 TIME_ZONE_INFORMATION tzInfo;
@@ -3102,7 +3113,7 @@ else version (Windows)
                 immutable result = SystemTimeToTzSpecificLocalTime(cast(TIME_ZONE_INFORMATION*) tzInfo,
                                                                    &utcTime,
                                                                    &otherTime);
-                assert(result);
+                assert(result, "Failed to create SystemTimeToTzSpecificLocalTime");
 
                 immutable otherDateTime = DateTime(otherTime.wYear,
                                                    otherTime.wMonth,
@@ -3116,7 +3127,7 @@ else version (Windows)
                 if (minutes == tzInfo.DaylightBias)
                     return true;
 
-                assert(minutes == tzInfo.StandardBias);
+                assert(minutes == tzInfo.StandardBias, "Unexpected difference");
 
                 return false;
             }
@@ -3196,6 +3207,7 @@ else version (Windows)
                                                                            &localTime,
                                                                            &utcTime);
                         assert(result);
+                        assert(result, "Failed to create _tzToUTC");
 
                         immutable utcDateTime = DateTime(utcTime.wYear,
                                                          utcTime.wMonth,
@@ -3210,7 +3222,7 @@ else version (Windows)
                         if (minutes == tzInfo.DaylightBias)
                             return true;
 
-                        assert(minutes == tzInfo.StandardBias);
+                        assert(minutes == tzInfo.StandardBias, "Unexpected difference");
 
                         return false;
                     }

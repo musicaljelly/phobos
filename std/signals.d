@@ -37,11 +37,11 @@
  *      $(LINK2 http://www.digitalmars.com/d/archives/16368.html, signals and slots)$(BR)
  *
  * Bugs:
- *      Slots can only be delegates formed from class objects or
+ *      $(RED Slots can only be delegates formed from class objects or
  *      interfaces to class objects. If a delegate to something else
  *      is passed to connect(), such as a struct member function,
- *      a nested function or a COM interface, undefined behavior
- *      will result.
+ *      a nested function, a COM interface or a closure, undefined behavior
+ *      will result.)
  *
  *      Not safe for multiple threads operating on the same signals
  *      or slots.
@@ -651,7 +651,7 @@ void linkin() { }
    a.emit(); // should not raise segfault since &o.watch2 is no longer connected
 }
 
-version (none) // Disabled because of dmd @@@BUG5028@@@
+version (none) // Disabled because of https://issues.dlang.org/show_bug.cgi?id=5028
 @system unittest
 {
     class A

@@ -47,6 +47,7 @@ composition templates that let you construct new ranges out of existing ranges:
 
 
 $(SCRIPT inhibitQuickIndex = 1;)
+$(DIVC quickindex,
 $(BOOKTABLE ,
     $(TR $(TD $(LREF chain))
         $(TD Concatenates several ranges into a single range.
@@ -206,7 +207,7 @@ $(BOOKTABLE ,
         tuple of all the first elements, a tuple of all the second elements,
         etc.
     ))
-)
+))
 
 Sortedness:
 
@@ -233,6 +234,7 @@ public import std.range.interfaces;
 public import std.range.primitives;
 public import std.typecons : Flag, Yes, No;
 
+import std.internal.attributes : betterC;
 import std.meta : allSatisfy, staticMap;
 import std.traits : CommonType, isCallable, isFloatingPoint, isIntegral,
     isPointer, isSomeFunction, isStaticArray, Unqual, isInstanceOf;
@@ -471,7 +473,7 @@ pure @safe nothrow @nogc unittest
     assert(equal(r, excepted[]));
 }
 
-// Issue 12662
+// https://issues.dlang.org/show_bug.cgi?id=12662
 pure @safe nothrow @nogc unittest
 {
     int[3] src = [1,2,3];
@@ -712,7 +714,7 @@ debug pure nothrow @system unittest
     scope (success) assert(passed);
     import core.exception : AssertError;
     //std.exception.assertThrown won't do because it can't infer nothrow
-    // @@@BUG@@@ 12647
+    // https://issues.dlang.org/show_bug.cgi?id=12647
     try
     {
         auto unused = testArr[].stride(0);
@@ -763,7 +765,7 @@ pure @safe nothrow unittest
     // assert(s2[$ .. $].empty);
     assert(s2[s2.opDollar .. s2.opDollar].empty);
 
-    // Test fix for Bug 5035
+    // Test fix for https://issues.dlang.org/show_bug.cgi?id=5035
     auto m = [1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4]; // 3 rows, 4 columns
     auto col = stride(m, 4);
     assert(equal(col, [1, 1, 1]));
@@ -912,16 +914,8 @@ if (Ranges.length > 0 &&
             }
 
             enum bool allSameType = allSatisfy!(sameET, R);
+            alias ElementType = RvalueElementType;
 
-            // This doesn't work yet
-            static if (allSameType)
-            {
-                alias ElementType = ref RvalueElementType;
-            }
-            else
-            {
-                alias ElementType = RvalueElementType;
-            }
             static if (allSameType && allSatisfy!(hasLvalueElements, R))
             {
                 static ref RvalueElementType fixRef(ref RvalueElementType val)
@@ -1321,7 +1315,8 @@ pure @safe nothrow unittest
         assert(c.moveAt(5) == 1);
     }
 
-    // Make sure bug 3311 is fixed.  ChainImpl should compile even if not all
+
+    // Make sure https://issues.dlang.org/show_bug.cgi?id=3311 is fixed.
     // elements are mutable.
     assert(equal(chain(iota(0, 3), iota(0, 3)), [0, 1, 2, 0, 1, 2]));
 
@@ -1341,7 +1336,8 @@ pure @safe nothrow unittest
     // pair of DummyRange types, in either order.
 
     foreach (DummyType1; AllDummyRanges)
-    (){ // workaround slow optimizations for large functions @@@BUG@@@ 2396
+    (){ // workaround slow optimizations for large functions
+        // https://issues.dlang.org/show_bug.cgi?id=2396
         DummyType1 dummy1;
         foreach (DummyType2; AllDummyRanges)
         {
@@ -1389,10 +1385,12 @@ pure @safe nothrow @nogc unittest
     assert(chain(a, b).empty);
 }
 
-pure @safe unittest // issue 18657
+// https://issues.dlang.org/show_bug.cgi?id=18657
+pure @safe unittest
 {
     import std.algorithm.comparison : equal;
-    auto r = refRange(&["foo"][0]).chain("bar");
+    string s = "foo";
+    auto r = refRange(&s).chain("bar");
     assert(equal(r.save, "foobar"));
     assert(equal(r, "foobar"));
 }
@@ -1498,13 +1496,25 @@ private struct ChooseResult(R1, R2)
         }
     }
 
-    void opAssign(return scope ChooseResult r) @trusted
+    void opAssign(ChooseResult r)
     {
+        static if (hasElaborateDestructor!R1 || hasElaborateDestructor!R2)
+            if (r1Chosen != r.r1Chosen)
+            {
+                // destroy the current item
+                actOnChosen!((ref r) => destroy(r))(this);
+            }
         r1Chosen = r.r1Chosen;
         if (r1Chosen)
-            r1 = r.r1;  // assigning to union members is @system
+        {
+            ref get1(return ref ChooseResult r) @trusted { return r.r1; }
+            get1(this) = get1(r);
+        }
         else
-            r2 = r.r2;
+        {
+            ref get2(return ref ChooseResult r) @trusted { return r.r2; }
+            get2(this) = get2(r);
+        }
     }
 
     // Carefully defined postblit to postblit the appropriate range
@@ -1544,37 +1554,17 @@ private struct ChooseResult(R1, R2)
     }
 
     static if (isForwardRange!R1 && isForwardRange!R2)
+    @property auto save() return scope
     {
-        private auto systemSave() return scope
+        if (r1Chosen)
         {
-            return r1Chosen
-                ? ChooseResult(r1Chosen, r1.save, r2)
-                : ChooseResult(r1Chosen, r1, r2.save);
+            ref R1 getR1() @trusted { return r1; }
+            return ChooseResult(r1Chosen, getR1.save, R2.init);
         }
-        private auto trustedSave()() @trusted return scope
+        else
         {
-            /*
-            Unsafe operations in this function:
-            - copying r1/r2 (postblit or copy constructor),
-            - r1.save/r2.save,
-            - accessing the union of r1 and r2.
-            The first two cannot be trusted, because they involve calling user
-            code. So they're only called via @safe wrappers.
-            The last one can be trusted. We're not returning a reference into
-            the union.
-            */
-            R safeSave(R)(ref R r) @safe { return r.save; }
-            R safeCopy(R)(ref R r) @safe { return r; }
-            return r1Chosen
-                ? ChooseResult(r1Chosen, safeSave(r1), safeCopy(r2))
-                : ChooseResult(r1Chosen, safeCopy(r1), safeSave(r2));
-        }
-        @property auto save() return scope
-        {
-            static if (__traits(compiles, trustedSave()))
-                return trustedSave();
-            else
-                return systemSave();
+            ref R2 getR2() @trusted { return r2; }
+            return ChooseResult(r1Chosen, R1.init, getR2.save);
         }
     }
 
@@ -1662,10 +1652,12 @@ private struct ChooseResult(R1, R2)
         }
 }
 
-pure @safe unittest // issue 18657
+// https://issues.dlang.org/show_bug.cgi?id=18657
+pure @safe unittest
 {
     import std.algorithm.comparison : equal;
-    auto r = choose(true, refRange(&["foo"][0]), "bar");
+    string s = "foo";
+    auto r = choose(true, refRange(&s), "bar");
     assert(equal(r.save, "foo"));
     assert(equal(r, "foo"));
 }
@@ -1701,6 +1693,7 @@ pure @safe unittest // issue 18657
     choose(true, [0], R()).save;
     choose(true, R(), [0]).save;
 }
+
 @safe unittest // copy is @system
 {
     static struct R
@@ -1715,6 +1708,7 @@ pure @safe unittest // issue 18657
     static assert(!__traits(compiles, choose(true, [0], R()).save));
     static assert(!__traits(compiles, choose(true, R(), [0]).save));
 }
+
 @system unittest // .save is @system
 {
     static struct R
@@ -1728,6 +1722,7 @@ pure @safe unittest // issue 18657
     choose(true, [0], R()).save;
     choose(true, R(), [0]).save;
 }
+
 @safe unittest // .save is @system
 {
     static struct R
@@ -1740,6 +1735,54 @@ pure @safe unittest // issue 18657
     static assert(!__traits(compiles, choose(true, R(), R()).save));
     static assert(!__traits(compiles, choose(true, [0], R()).save));
     static assert(!__traits(compiles, choose(true, R(), [0]).save));
+}
+
+//https://issues.dlang.org/show_bug.cgi?id=19738
+@safe nothrow pure @nogc unittest
+{
+    static struct EvilRange
+    {
+        enum empty = true;
+        int front;
+        void popFront() @safe {}
+        auto opAssign(const ref EvilRange other)
+        {
+            *(cast(uint*) 0xcafebabe) = 0xdeadbeef;
+            return this;
+        }
+    }
+
+    static assert(!__traits(compiles, () @safe
+    {
+        auto c1 = choose(true, EvilRange(), EvilRange());
+        auto c2 = c1;
+        c1 = c2;
+    }));
+}
+
+
+// https://issues.dlang.org/show_bug.cgi?id=20495
+@safe unittest
+{
+    static struct KillableRange
+    {
+        int *item;
+        ref int front() { return *item; }
+        bool empty() { return *item > 10; }
+        void popFront() { ++(*item); }
+        this(this)
+        {
+            assert(item is null || cast(size_t) item > 1000);
+            item = new int(*item);
+        }
+        KillableRange save() { return this; }
+    }
+
+    auto kr = KillableRange(new int(1));
+    int[] x = [1,2,3,4,5]; // length is first
+
+    auto chosen = choose(true, x, kr);
+    auto chosen2 = chosen.save;
 }
 
 /**
@@ -2037,7 +2080,8 @@ if (Rs.length > 1 && allSatisfy!(isInputRange, staticMap!(Unqual, Rs)))
 pure @safe unittest
 {
     import std.algorithm.comparison : equal;
-    auto r = roundRobin(refRange(&["foo"][0]), refRange(&["bar"][0]));
+    string f = "foo", b = "bar";
+    auto r = roundRobin(refRange(&f), refRange(&b));
     assert(equal(r.save, "fboaor"));
     assert(equal(r.save, "fboaor"));
 }
@@ -2235,7 +2279,8 @@ if (isInputRange!(Unqual!Range) &&
             assert(!empty,
                 "Attempting to assign to the front of an empty "
                 ~ Take.stringof);
-            // This has to return auto instead of void because of Bug 4706.
+            // This has to return auto instead of void because of
+            // https://issues.dlang.org/show_bug.cgi?id=4706
             source.front = v;
         }
 
@@ -2320,7 +2365,8 @@ if (isInputRange!(Unqual!Range) &&
             /// ditto
             @property void back(ElementType!R v)
             {
-                // This has to return auto instead of void because of Bug 4706.
+                // This has to return auto instead of void because of
+                // https://issues.dlang.org/show_bug.cgi?id=4706
                 assert(!empty,
                     "Attempting to assign to the back of an empty "
                     ~ Take.stringof);
@@ -2485,7 +2531,8 @@ pure @safe nothrow @nogc unittest
 {
     // Check that one can declare variables of all Take types,
     // and that they match the return type of the corresponding
-    // take().  (See issue 4464.)
+    // take().
+    // See https://issues.dlang.org/show_bug.cgi?id=4464
     int[] r1;
     Take!(int[]) t1;
     t1 = take(r1, 1);
@@ -2511,7 +2558,8 @@ pure @safe nothrow @nogc unittest
     static assert(isBidirectionalRange!TR2);
 }
 
-pure @safe nothrow @nogc unittest //12731
+// https://issues.dlang.org/show_bug.cgi?id=12731
+pure @safe nothrow @nogc unittest
 {
     auto a = repeat(1);
     auto s = a[1 .. 5];
@@ -2521,7 +2569,8 @@ pure @safe nothrow @nogc unittest //12731
     assert(s[1] == 1);
 }
 
-pure @safe nothrow @nogc unittest //13151
+// https://issues.dlang.org/show_bug.cgi?id=13151
+pure @safe nothrow @nogc unittest
 {
     import std.algorithm.comparison : equal;
 
@@ -2944,7 +2993,7 @@ pure @safe nothrow @nogc unittest
     assertThrown!AssertError(s.popBack);
 }
 
-//guards against issue 16999
+// https://issues.dlang.org/show_bug.cgi?id=16999
 pure @safe unittest
 {
     auto myIota = new class
@@ -3003,7 +3052,7 @@ if (isInputRange!R)
     //member version if it's defined.
     static if (is(typeof(R.takeNone)))
         auto retval = range.takeNone();
-    //@@@BUG@@@ 8339
+    // https://issues.dlang.org/show_bug.cgi?id=8339
     else static if (isDynamicArray!R)/+ ||
                    (is(R == struct) && __traits(compiles, {auto r = R.init;}) && R.init.empty))+/
     {
@@ -3015,7 +3064,8 @@ if (isInputRange!R)
     else
         auto retval = takeExactly(range, 0);
 
-    //@@@BUG@@@ 7892 prevents this from being done in an out block.
+    // https://issues.dlang.org/show_bug.cgi?id=7892 prevents this from being
+    // done in an out block.
     assert(retval.empty);
     return retval;
 }
@@ -3116,8 +3166,8 @@ pure @safe nothrow unittest
                              "hello world"w,
                              "hello world"d,
                              SliceStruct([1, 2, 3]),
-                             //@@@BUG@@@ 8339 forces this to be takeExactly
-                             //`InitStruct([1, 2, 3]),
+                             // https://issues.dlang.org/show_bug.cgi?id=8339
+                             // forces this to be takeExactly `InitStruct([1, 2, 3]),
                              TakeNoneStruct([1, 2, 3])))
     {
         static assert(takeNone(range).empty, typeof(range).stringof);
@@ -3148,7 +3198,8 @@ pure @safe nothrow unittest
 
     auto filtered = filter!"true"([1, 2, 3, 4, 5]);
     assert(takeNone(filtered).empty);
-    //@@@BUG@@@ 8339 and 5941 force this to be takeExactly
+    // https://issues.dlang.org/show_bug.cgi?id=8339 and
+    // https://issues.dlang.org/show_bug.cgi?id=5941 force this to be takeExactly
     //static assert(is(typeof(filtered) == typeof(takeNone(filtered))), typeof(filtered).stringof);
 }
 
@@ -3228,7 +3279,7 @@ pure @safe nothrow unittest
         .assumeWontThrow);
 }
 
-// @nogc prevented by @@@BUG@@@ 15408
+// @nogc prevented by https://issues.dlang.org/show_bug.cgi?id=15408
 pure nothrow @safe /+@nogc+/ unittest
 {
     import std.algorithm.comparison : equal;
@@ -3296,13 +3347,6 @@ if (isInputRange!R)
     range.popFrontN(n);
     return range;
 }
-/// ditto
-R dropBack(R)(R range, size_t n)
-if (isBidirectionalRange!R)
-{
-    range.popBackN(n);
-    return range;
-}
 
 ///
 @safe unittest
@@ -3315,6 +3359,15 @@ if (isBidirectionalRange!R)
     assert("hello world".take(6).drop(3).equal("lo "));
 }
 
+/// ditto
+R dropBack(R)(R range, size_t n)
+if (isBidirectionalRange!R)
+{
+    range.popBackN(n);
+    return range;
+}
+
+///
 @safe unittest
 {
     import std.algorithm.comparison : equal;
@@ -3579,7 +3632,8 @@ pure @safe nothrow unittest
     assert(5.repeat(4).equal([5, 5, 5, 5]));
 }
 
-pure @safe nothrow unittest //12007
+// https://issues.dlang.org/show_bug.cgi?id=12007
+pure @safe nothrow unittest
 {
     static class C{}
     Repeat!(immutable int) ri;
@@ -4243,7 +4297,8 @@ if (isStaticArray!R)
     assert(cleS.front == 0);
 }
 
-@system unittest //10845
+// https://issues.dlang.org/show_bug.cgi?id=10845
+@system unittest
 {
     import std.algorithm.comparison : equal;
     import std.algorithm.iteration : filter;
@@ -4252,12 +4307,13 @@ if (isStaticArray!R)
     assert(equal(cycle(a).take(10), [0, 1, 2, 0, 1, 2, 0, 1, 2, 0]));
 }
 
-@safe unittest // 12177
+// https://issues.dlang.org/show_bug.cgi?id=12177
+@safe unittest
 {
     static assert(__traits(compiles, recurrence!q{a[n - 1] ~ a[n - 2]}("1", "0")));
 }
 
-// Issue 13390
+// https://issues.dlang.org/show_bug.cgi?id=13390
 @system unittest
 {
     import core.exception : AssertError;
@@ -4265,10 +4321,12 @@ if (isStaticArray!R)
     assertThrown!AssertError(cycle([0, 1, 2][0 .. 0]));
 }
 
-pure @safe unittest // issue 18657
+// https://issues.dlang.org/show_bug.cgi?id=18657
+pure @safe unittest
 {
     import std.algorithm.comparison : equal;
-    auto r = refRange(&["foo"][0]).cycle.take(4);
+    string s = "foo";
+    auto r = refRange(&s).cycle.take(4);
     assert(equal(r.save, "foof"));
     assert(equal(r.save, "foof"));
 }
@@ -5196,11 +5254,12 @@ pure @system unittest
         assert(zLongest.empty);
     }
 
-    // BUG 8900
+    // https://issues.dlang.org/show_bug.cgi?id=8900
     assert(zip([1, 2], repeat('a')).array == [tuple(1, 'a'), tuple(2, 'a')]);
     assert(zip(repeat('a'), [1, 2]).array == [tuple('a', 1), tuple('a', 2)]);
 
-    // Issue 18524 - moveBack instead performs moveFront
+    // https://issues.dlang.org/show_bug.cgi?id=18524
+    // moveBack instead performs moveFront
     {
         auto r = zip([1,2,3]);
         assert(r.moveBack()[0] == 3);
@@ -5274,7 +5333,7 @@ nothrow pure @safe unittest
     assert(equal(z2, [tuple(7, 0L)]));
 }
 
-// Text for Issue 11196
+// Test for https://issues.dlang.org/show_bug.cgi?id=11196
 @safe pure unittest
 {
     import std.exception : assertThrown;
@@ -5285,7 +5344,8 @@ nothrow pure @safe unittest
     assertThrown(zip(StoppingPolicy.longest, cast(S[]) null, new int[1]).front);
 }
 
-@nogc nothrow @safe pure unittest //12007
+// https://issues.dlang.org/show_bug.cgi?id=12007
+@nogc nothrow @safe pure unittest
 {
     static struct R
     {
@@ -5597,7 +5657,8 @@ if (allSatisfy!(isInputRange, Ranges))
    }
 }
 
-@system unittest // Bugzilla 15860: foreach_reverse on lockstep
+// https://issues.dlang.org/show_bug.cgi?id=15860: foreach_reverse on lockstep
+@system unittest
 {
     auto arr1 = [0, 1, 2, 3];
     auto arr2 = [4, 5, 6, 7];
@@ -5679,8 +5740,9 @@ if (allSatisfy!(isInputRange, Ranges))
         assert(0);
     } catch (Exception) {}
 
-    // Just make sure 1-range case instantiates.  This hangs the compiler
-    // when no explicit stopping policy is specified due to Bug 4652.
+    // Just make sure 1-range case instantiates. This hangs the compiler
+    // when no explicit stopping policy is specified due to
+    // https://issues.dlang.org/show_bug.cgi?id=4652
     auto stuff = lockstep([1,2,3,4,5], StoppingPolicy.shortest);
     foreach (i, a; stuff)
     {
@@ -6084,7 +6146,7 @@ pure @safe nothrow @nogc unittest
     assert(equal(odds.take(3), only(21, 23, 25)));
 }
 
-// Issue 5036
+// https://issues.dlang.org/show_bug.cgi?id=5036
 pure @safe nothrow unittest
 {
     auto s = sequence!((a, n) => new int)(0);
@@ -6603,14 +6665,15 @@ pure @safe unittest
     assert(iota_of_longs_with_steps.length == 6);
     assert(equal(iota_of_longs_with_steps, [50L, 60L, 70L, 80L, 90L, 100L]));
 
-    // iota of unsigned zero length (issue 6222, actually trying to consume it
-    // is the only way to find something is wrong because the public
-    // properties are all correct)
+    // iota of unsigned zero length (https://issues.dlang.org/show_bug.cgi?id=6222)
+    // Actually trying to consume it is the only way to find something is wrong
+    // because the public properties are all correct.
     auto iota_zero_unsigned = iota(0, 0u, 3);
     assert(count(iota_zero_unsigned) == 0);
 
-    // unsigned reverse iota can be buggy if .length doesn't take them into
-    // account (issue 7982).
+    // https://issues.dlang.org/show_bug.cgi?id=7982
+    // unsigned reverse iota can be buggy if `.length` doesn't
+    // take them into account
     assert(iota(10u, 0u, -1).length == 10);
     assert(iota(10u, 0u, -2).length == 5);
     assert(iota(uint.max, uint.max-10, -1).length == 10);
@@ -6626,7 +6689,7 @@ pure @safe unittest
     assert(!(int.max in iota(20u, 10u, -1)));
 
 
-    // Issue 8920
+    // https://issues.dlang.org/show_bug.cgi?id=8920
     static foreach (Type; AliasSeq!(byte, ubyte, short, ushort,
         int, uint, long, ulong))
     {{
@@ -7129,7 +7192,7 @@ pure @safe nothrow unittest
     }
 }
 
-// Issue 16363
+// https://issues.dlang.org/show_bug.cgi?id=16363
 pure @safe nothrow unittest
 {
     import std.algorithm.comparison : equal;
@@ -7141,7 +7204,7 @@ pure @safe nothrow unittest
     static assert(isRandomAccessRange!(typeof(ft)));
 }
 
-// Bugzilla 16442
+// https://issues.dlang.org/show_bug.cgi?id=16442
 pure @safe nothrow unittest
 {
     int[][] arr = [[], []];
@@ -7555,7 +7618,7 @@ private:
     assert(transposed(ror).empty);
 }
 
-// Issue 9507
+// https://issues.dlang.org/show_bug.cgi?id=9507
 @safe unittest
 {
     import std.algorithm.comparison : equal;
@@ -7567,7 +7630,7 @@ private:
     ]));
 }
 
-// Issue 17742
+// https://issues.dlang.org/show_bug.cgi?id=17742
 @safe unittest
 {
     import std.algorithm.iteration : map;
@@ -7660,7 +7723,7 @@ if (isForwardRange!RangeOfRanges &&
     }
 }
 
-// Issue 8764
+// https://issues.dlang.org/show_bug.cgi?id=8764
 @safe unittest
 {
     import std.algorithm.comparison : equal;
@@ -9673,11 +9736,14 @@ public:
     assert([1].map!(x => x).slide(2).equal!equal([[1]]));
 }
 
-private struct OnlyResult(T, size_t arity)
+private struct OnlyResult(Values...)
+if (Values.length > 1)
 {
-    private this(Values...)(return scope auto ref Values values)
+    private enum arity = Values.length;
+
+    private this(return scope ref Values values)
     {
-        this.data = [values];
+        this.values = values;
         this.backIndex = arity;
     }
 
@@ -9686,10 +9752,10 @@ private struct OnlyResult(T, size_t arity)
         return frontIndex >= backIndex;
     }
 
-    T front() @property
+    CommonType!Values front() @property
     {
         assert(!empty, "Attempting to fetch the front of an empty Only range");
-        return data[frontIndex];
+        return this[0];
     }
 
     void popFront()
@@ -9698,10 +9764,10 @@ private struct OnlyResult(T, size_t arity)
         ++frontIndex;
     }
 
-    T back() @property
+    CommonType!Values back() @property
     {
         assert(!empty, "Attempting to fetch the back of an empty Only range");
-        return data[backIndex - 1];
+        return this[$ - 1];
     }
 
     void popBack()
@@ -9722,12 +9788,15 @@ private struct OnlyResult(T, size_t arity)
 
     alias opDollar = length;
 
-    T opIndex(size_t idx)
+    CommonType!Values opIndex(size_t idx)
     {
         // when i + idx points to elements popped
         // with popBack
         assert(idx < length, "Attempting to fetch an out of bounds index from an Only range");
-        return data[frontIndex + idx];
+        final switch (frontIndex + idx)
+            static foreach (i, T; Values)
+            case i:
+                return values[i];
     }
 
     OnlyResult opSlice()
@@ -9754,21 +9823,21 @@ private struct OnlyResult(T, size_t arity)
     private size_t frontIndex = 0;
     private size_t backIndex = 0;
 
-    // @@@BUG@@@ 10643
+    // https://issues.dlang.org/show_bug.cgi?id=10643
     version (none)
     {
         import std.traits : hasElaborateAssign;
         static if (hasElaborateAssign!T)
-            private T[arity] data;
+            private Values values;
         else
-            private T[arity] data = void;
+            private Values values = void;
     }
     else
-        private T[arity] data;
+        private Values values;
 }
 
 // Specialize for single-element results
-private struct OnlyResult(T, size_t arity : 1)
+private struct OnlyResult(T)
 {
     @property T front()
     {
@@ -9832,7 +9901,7 @@ private struct OnlyResult(T, size_t arity : 1)
 }
 
 // Specialize for the empty range
-private struct OnlyResult(T, size_t arity : 0)
+private struct OnlyResult()
 {
     private static struct EmptyElementType {}
 
@@ -9879,10 +9948,10 @@ Returns:
 
 See_Also: $(LREF chain) to chain ranges
  */
-auto only(Values...)(return scope auto ref Values values)
+auto only(Values...)(return scope Values values)
 if (!is(CommonType!Values == void) || Values.length == 0)
 {
-    return OnlyResult!(CommonType!Values, Values.length)(values);
+    return OnlyResult!Values(values);
 }
 
 ///
@@ -9906,15 +9975,14 @@ if (!is(CommonType!Values == void) || Values.length == 0)
         .equal("T.D.P.L"));
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=20314
 @safe unittest
 {
-    // Verify that the same common type and same arity
-    // results in the same template instantiation
-    static assert(is(typeof(only(byte.init, int.init)) ==
-        typeof(only(int.init, byte.init))));
+    import std.algorithm.iteration : joiner;
 
-    static assert(is(typeof(only((const(char)[]).init, string.init)) ==
-        typeof(only((const(char)[]).init, (const(char)[]).init))));
+    const string s = "foo", t = "bar";
+
+    assert([only(s, t), only(t, s)].joiner(only(", ")).join == "foobar, barfoo");
 }
 
 // Tests the zero-element result
@@ -9979,7 +10047,7 @@ if (!is(CommonType!Values == void) || Values.length == 0)
     assert(imm.front == 1);
     assert(imm.back == 1);
     assert(!imm.empty);
-    assert(imm.init.empty); // Issue 13441
+    assert(imm.init.empty); // https://issues.dlang.org/show_bug.cgi?id=13441
     assert(imm.length == 1);
     assert(equal(imm, imm[]));
     assert(equal(imm, imm[0 .. 1]));
@@ -10068,7 +10136,7 @@ if (!is(CommonType!Values == void) || Values.length == 0)
     alias Imm = typeof(imm);
     static assert(is(ElementType!Imm == immutable(int)));
     assert(!imm.empty);
-    assert(imm.init.empty); // Issue 13441
+    assert(imm.init.empty); // https://issues.dlang.org/show_bug.cgi?id=13441
     assert(imm.front == 42);
     imm.popFront();
     assert(imm.front == 24);
@@ -10078,6 +10146,43 @@ if (!is(CommonType!Values == void) || Values.length == 0)
     static struct Test { int* a; }
     immutable(Test) test;
     cast(void) only(test, test); // Works with mutable indirection
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=21129
+@safe unittest
+{
+    auto range = () @safe {
+        const(char)[5] staticStr = "Hello";
+
+        // `only` must store a char[5] - not a char[]!
+        return only(staticStr, " World");
+    } ();
+
+    assert(range.join == "Hello World");
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=21129
+@safe unittest
+{
+    struct AliasedString
+    {
+        const(char)[5] staticStr = "Hello";
+
+        @property const(char)[] slice() const
+        {
+            return staticStr[];
+        }
+        alias slice this;
+    }
+
+    auto range = () @safe {
+        auto hello = AliasedString();
+
+        // a copy of AliasedString is stored in the range.
+        return only(hello, " World");
+    } ();
+
+    assert(range.join == "Hello World");
 }
 
 /**
@@ -10408,7 +10513,8 @@ pure @safe unittest
     }}
 }
 
-version (none) // @@@BUG@@@ 10939
+// https://issues.dlang.org/show_bug.cgi?id=10939
+version (none)
 {
     // Re-enable (or remove) if 10939 is resolved.
     /+pure+/ @safe unittest // Impure because of std.conv.to
@@ -10458,21 +10564,19 @@ version (none) // @@@BUG@@@ 10939
   Returns true if `fn` accepts variables of type T1 and T2 in any order.
   The following code should compile:
   ---
-  T1 foo();
-  T2 bar();
-
-  fn(foo(), bar());
-  fn(bar(), foo());
+  (ref T1 a, ref T2 b)
+  {
+    fn(a, b);
+    fn(b, a);
+  }
   ---
 */
 template isTwoWayCompatible(alias fn, T1, T2)
 {
-    enum isTwoWayCompatible = is(typeof( (){
-            T1 foo();
-            T2 bar();
-
-            cast(void) fn(foo(), bar());
-            cast(void) fn(bar(), foo());
+    enum isTwoWayCompatible = is(typeof((ref T1 a, ref T2 b)
+        {
+            cast(void) fn(a, b);
+            cast(void) fn(b, a);
         }
     ));
 }
@@ -10486,6 +10590,10 @@ template isTwoWayCompatible(alias fn, T1, T2)
     static assert(isTwoWayCompatible!(func1, int, int));
     static assert(isTwoWayCompatible!(func1, short, int));
     static assert(!isTwoWayCompatible!(func2, int, float));
+
+    void func3(ref int a, ref int b);
+    static assert( isTwoWayCompatible!(func3, int, int));
+    static assert(!isTwoWayCompatible!(func3, short, int));
 }
 
 
@@ -10560,16 +10668,56 @@ enum SearchPolicy
 }
 
 /**
-Represents a sorted range. In addition to the regular range
-primitives, supports additional operations that take advantage of the
-ordering, such as merge and binary search. To obtain a $(D
-SortedRange) from an unsorted range `r`, use
-$(REF sort, std,algorithm,sorting) which sorts `r` in place and returns the
-corresponding `SortedRange`. To construct a `SortedRange` from a range
-`r` that is known to be already sorted, use $(LREF assumeSorted) described
-below.
+   Options for $(LREF SortedRange) ranges (below).
 */
-struct SortedRange(Range, alias pred = "a < b")
+enum SortedRangeOptions
+{
+   /**
+      Assume, that the range is sorted without checking.
+   */
+   assumeSorted,
+
+   /**
+      All elements of the range are checked to be sorted.
+      The check is performed in O(n) time.
+   */
+   checkStrictly,
+
+   /**
+      Some elements of the range are checked to be sorted.
+      For ranges with random order, this will almost surely
+      detect, that it is not sorted. For almost sorted ranges
+      it's more likely to fail. The checked elements are choosen
+      in a deterministic manner, which makes this check reproducable.
+      The check is performed in O(log(n)) time.
+   */
+   checkRoughly,
+}
+
+///
+@safe pure unittest
+{
+    // create a SortedRange, that's checked strictly
+    SortedRange!(int[],"a < b", SortedRangeOptions.checkStrictly)([ 1, 3, 5, 7, 9 ]);
+}
+
+/**
+   Represents a sorted range. In addition to the regular range
+   primitives, supports additional operations that take advantage of the
+   ordering, such as merge and binary search. To obtain a $(D
+   SortedRange) from an unsorted range `r`, use
+   $(REF sort, std,algorithm,sorting) which sorts `r` in place and returns the
+   corresponding `SortedRange`. To construct a `SortedRange` from a range
+   `r` that is known to be already sorted, use $(LREF assumeSorted).
+
+   Params:
+       pred: The predicate used to define the sortedness
+       opt: Controls how strongly the range is checked for sortedness.
+            Will only be used for `RandomAccessRanges`.
+            Will not be used in CTFE.
+*/
+struct SortedRange(Range, alias pred = "a < b",
+    SortedRangeOptions opt = SortedRangeOptions.assumeSorted)
 if (isInputRange!Range && !isInstanceOf!(SortedRange, Range))
 {
     import std.functional : binaryFun;
@@ -10588,36 +10736,55 @@ if (isInputRange!Range && !isInstanceOf!(SortedRange, Range))
     // Undocummented because a clearer way to invoke is by calling
     // assumeSorted.
     this(Range input)
-    out
     {
-        // moved out of the body as a workaround for Issue 12661
-        dbgVerifySorted();
-    }
-    do
-    {
+        static if (opt == SortedRangeOptions.checkRoughly)
+        {
+            roughlyVerifySorted(input);
+        }
+        static if (opt == SortedRangeOptions.checkStrictly)
+        {
+            strictlyVerifySorted(input);
+        }
         this._input = input;
     }
 
     // Assertion only.
-    private void dbgVerifySorted()
+    static if (opt == SortedRangeOptions.checkRoughly)
+    private void roughlyVerifySorted(Range r)
     {
         if (!__ctfe)
-        debug
         {
             static if (isRandomAccessRange!Range && hasLength!Range)
             {
                 import core.bitop : bsr;
                 import std.algorithm.sorting : isSorted;
+                import std.exception : enforce;
 
                 // Check the sortedness of the input
-                if (this._input.length < 2) return;
+                if (r.length < 2) return;
 
-                immutable size_t msb = bsr(this._input.length) + 1;
-                assert(msb > 0 && msb <= this._input.length);
-                immutable step = this._input.length / msb;
-                auto st = stride(this._input, step);
+                immutable size_t msb = bsr(r.length) + 1;
+                assert(msb > 0 && msb <= r.length);
+                immutable step = r.length / msb;
+                auto st = stride(r, step);
 
-                assert(isSorted!pred(st), "Range is not sorted");
+                enforce(isSorted!pred(st), "Range is not sorted");
+            }
+        }
+    }
+
+    // Assertion only.
+    static if (opt == SortedRangeOptions.checkStrictly)
+    private void strictlyVerifySorted(Range r)
+    {
+        if (!__ctfe)
+        {
+            static if (isRandomAccessRange!Range && hasLength!Range)
+            {
+                import std.algorithm.sorting : isSorted;
+                import std.exception : enforce;
+
+                enforce(isSorted!pred(r), "Range is not sorted");
             }
         }
     }
@@ -10809,6 +10976,7 @@ if (isInputRange!Range && !isInstanceOf!(SortedRange, Range))
     }
 
     ///
+    static if (is(Range : int[]))
     @safe unittest
     {
         import std.algorithm.comparison : equal;
@@ -10851,6 +11019,7 @@ policies are allowed, and `SearchPolicy.binarySearch` is the default.
     }
 
     ///
+    static if (is(Range : int[]))
     @safe unittest
     {
         import std.algorithm.comparison : equal;
@@ -10913,6 +11082,7 @@ policies are allowed, and `SearchPolicy.binarySearch` is the default.
     }
 
     ///
+    static if (is(Range : int[]))
     @safe unittest
     {
         import std.algorithm.comparison : equal;
@@ -10973,6 +11143,7 @@ equalRange). Completes the entire search in $(BIGOH log(n)) time.
     }
 
     ///
+    static if (is(Range : int[]))
     @safe unittest
     {
         import std.algorithm.comparison : equal;
@@ -11002,7 +11173,7 @@ evaluations of `pred`.
 /**
 Like `contains`, but the value is specified before the range.
 */
-    auto opBinaryRight(string op, V)(V value)
+    bool opBinaryRight(string op, V)(V value)
     if (op == "in" && isRandomAccessRange!Range)
     {
         return contains(value);
@@ -11021,11 +11192,12 @@ sorting relation.
 }
 
 /// ditto
-template SortedRange(Range, alias pred = "a < b")
+template SortedRange(Range, alias pred = "a < b",
+                     SortedRangeOptions opt = SortedRangeOptions.assumeSorted)
 if (isInstanceOf!(SortedRange, Range))
 {
-    // Avoid nesting SortedRange types (see Issue 18933);
-    alias SortedRange = SortedRange!(Unqual!(typeof(Range._input)), pred);
+    // Avoid nesting SortedRange types (see https://issues.dlang.org/show_bug.cgi?id=18933);
+    alias SortedRange = SortedRange!(Unqual!(typeof(Range._input)), pred, opt);
 }
 
 ///
@@ -11059,6 +11231,18 @@ that break its sorted-ness, `SortedRange` will work erratically.
     assert(r.contains(42));
     swap(a[3], a[5]);         // illegal to break sortedness of original range
     assert(!r.contains(42));  // passes although it shouldn't
+}
+
+@safe unittest
+{
+    import std.exception : assertThrown, assertNotThrown;
+
+    assertNotThrown(SortedRange!(int[])([ 1, 3, 10, 5, 7 ]));
+    assertThrown(SortedRange!(int[],"a < b", SortedRangeOptions.checkStrictly)([ 1, 3, 10, 5, 7 ]));
+
+    // these two checks are implementation depended
+    assertNotThrown(SortedRange!(int[],"a < b", SortedRangeOptions.checkRoughly)([ 1, 3, 10, 5, 12, 2 ]));
+    assertThrown(SortedRange!(int[],"a < b", SortedRangeOptions.checkRoughly)([ 1, 3, 10, 5, 2, 12 ]));
 }
 
 @safe unittest
@@ -11149,9 +11333,9 @@ that break its sorted-ness, `SortedRange` will work erratically.
     assert(!r.contains(42));            // passes although it shouldn't
 }
 
-@safe unittest
+@betterC @nogc nothrow @safe unittest
 {
-    immutable(int)[] arr = [ 1, 2, 3 ];
+    static immutable(int)[] arr = [ 1, 2, 3 ];
     auto s = assumeSorted(arr);
 }
 
@@ -11195,15 +11379,8 @@ that break its sorted-ness, `SortedRange` will work erratically.
 
 /**
 Assumes `r` is sorted by predicate `pred` and returns the
-corresponding $(D SortedRange!(pred, R)) having `r` as support. To
-keep the checking costs low, the cost is $(BIGOH 1) in release mode
-(no checks for sorted-ness are performed). In debug mode, a few random
-elements of `r` are checked for sorted-ness. The size of the sample
-is proportional $(BIGOH log(r.length)). That way, checking has no
-effect on the complexity of subsequent operations specific to sorted
-ranges (such as binary search). The probability of an arbitrary
-unsorted range failing the test is very high (however, an
-almost-sorted range is likely to pass it). To check for sorted-ness at
+corresponding $(D SortedRange!(pred, R)) having `r` as support.
+To check for sorted-ness at
 cost $(BIGOH n), use $(REF isSorted, std,algorithm,sorting).
  */
 auto assumeSorted(alias pred = "a < b", R)(R r)
@@ -11249,7 +11426,8 @@ if (isInputRange!(Unqual!R))
     p = assumeSorted(a).upperBound(4.2);
     assert(equal(p, [ 5, 6 ]));
 
-    // Issue 18933 - don't create senselessly nested SortedRange types.
+    // https://issues.dlang.org/show_bug.cgi?id=18933
+    // don't create senselessly nested SortedRange types.
     assert(is(typeof(assumeSorted(a)) == typeof(assumeSorted(assumeSorted(a)))));
     assert(is(typeof(assumeSorted(a)) == typeof(assumeSorted(assumeSorted!"a > b"(a)))));
 }
@@ -11295,21 +11473,7 @@ if (isInputRange!(Unqual!R))
     r = assumeSorted(a);
 }
 
-@system unittest
-{
-    bool ok = true;
-    try
-    {
-        auto r2 = assumeSorted([ 677, 345, 34, 7, 5 ]);
-        debug ok = false;
-    }
-    catch (Throwable)
-    {
-    }
-    assert(ok);
-}
-
-// issue 15003
+// https://issues.dlang.org/show_bug.cgi?id=15003
 @nogc @safe unittest
 {
     static immutable a = [1, 2, 3, 4];
@@ -11833,8 +11997,8 @@ private:
     }
 
     {
-        // Issue 16534 - opDollar should be defined if the
-        // wrapped range defines length.
+        // https://issues.dlang.org/show_bug.cgi?id=16534
+        // opDollar should be defined if the wrapped range defines length.
         auto range = 10.iota.takeExactly(5);
         auto wrapper = refRange(&range);
         assert(wrapper.length == 5);
@@ -12022,7 +12186,8 @@ private:
     assert(cWrapper is c);
 }
 
-@system unittest // issue 14373
+// https://issues.dlang.org/show_bug.cgi?id=14373
+@system unittest
 {
     static struct R
     {
@@ -12035,7 +12200,8 @@ private:
     assert(r.empty);
 }
 
-@system unittest // issue 14575
+// https://issues.dlang.org/show_bug.cgi?id=14575
+@system unittest
 {
     struct R
     {
@@ -12075,9 +12241,8 @@ if (isInputRange!R)
         return *range;
 }
 
-/*****************************************************************************/
-
-@safe unittest    // bug 9060
+// https://issues.dlang.org/show_bug.cgi?id=9060
+@safe unittest
 {
     import std.algorithm.iteration : map, joiner, group;
     import std.algorithm.searching : until;
@@ -12268,7 +12433,7 @@ public:
         {
             immutable size_t remainingBits = bitsNum - maskPos + 1;
             // If n >= maskPos, then the bit sign will be 1, otherwise 0
-            immutable sizediff_t sign = (remainingBits - n - 1) >> (sizediff_t.sizeof * 8 - 1);
+            immutable ptrdiff_t sign = (remainingBits - n - 1) >> (ptrdiff_t.sizeof * 8 - 1);
             /*
                By truncating n with remainingBits bits we have skipped the
                remaining bits in parent[0], so we need to add 1 to elemIndex.
@@ -12308,7 +12473,7 @@ public:
                 import core.bitop : bsf;
 
                 immutable size_t remainingBits = bitsNum - maskPos + 1;
-                immutable sizediff_t sign = (remainingBits - n - 1) >> (sizediff_t.sizeof * 8 - 1);
+                immutable ptrdiff_t sign = (remainingBits - n - 1) >> (ptrdiff_t.sizeof * 8 - 1);
                 immutable size_t elemIndex = sign * (((n - remainingBits) >> bitsNum.bsf) + 1);
                 immutable size_t elemMaskPos = (sign ^ 1) * (maskPos + n)
                     + sign * (1 + ((n - remainingBits) & (bitsNum - 1)));
@@ -12335,14 +12500,14 @@ public:
             import core.bitop : bsf;
 
             size_t remainingBits = bitsNum - maskPos + 1;
-            sizediff_t sign = (remainingBits - start - 1) >> (sizediff_t.sizeof * 8 - 1);
+            ptrdiff_t sign = (remainingBits - start - 1) >> (ptrdiff_t.sizeof * 8 - 1);
             immutable size_t startElemIndex = sign * (((start - remainingBits) >> bitsNum.bsf) + 1);
             immutable size_t startElemMaskPos = (sign ^ 1) * (maskPos + start)
                                               + sign * (1 + ((start - remainingBits) & (bitsNum - 1)));
 
             immutable size_t sliceLen = end - start - 1;
             remainingBits = bitsNum - startElemMaskPos + 1;
-            sign = (remainingBits - sliceLen - 1) >> (sizediff_t.sizeof * 8 - 1);
+            sign = (remainingBits - sliceLen - 1) >> (ptrdiff_t.sizeof * 8 - 1);
             immutable size_t endElemIndex = startElemIndex
                                           + sign * (((sliceLen - remainingBits) >> bitsNum.bsf) + 1);
             immutable size_t endElemMaskPos = (sign ^ 1) * (startElemMaskPos + sliceLen)
@@ -12644,8 +12809,13 @@ auto ref nullSink()
   Params:
   pipeOnPop = If `Yes.pipeOnPop`, simply iterating the range without ever
   calling `front` is enough to have `tee` mirror elements to `outputRange` (or,
-  respectively, `fun`). If `No.pipeOnPop`, only elements for which `front` does
-  get called will be also sent to `outputRange`/`fun`.
+  respectively, `fun`). Note that each `popFront()` call will mirror the
+  old `front` value, not the new one. This means that the last value will
+  not be forwarded if the range isn't iterated until empty. If
+  `No.pipeOnPop`, only elements for which `front` does get called will be
+  also sent to `outputRange`/`fun`. If `front` is called twice for the same
+  element, it will still be sent only once. If this caching is undesired,
+  consider using $(REF map, std,algorithm,iteration) instead.
   inputRange = The input range being passed through.
   outputRange = This range will receive elements of `inputRange` progressively
   as iteration proceeds.
@@ -12916,9 +13086,9 @@ if (is(typeof(fun) == void) || isSomeFunction!fun)
     }}
 }
 
+// https://issues.dlang.org/show_bug.cgi?id=13483
 @safe unittest
 {
-    // Issue 13483
     static void func1(T)(T x) {}
     void func2(int x) {}
 
@@ -13312,7 +13482,7 @@ pure @safe unittest
     assert(len == 6);
 }
 
-// Issue 19042
+// https://issues.dlang.org/show_bug.cgi?id=19042
 @safe pure unittest
 {
     import std.algorithm.comparison : equal;
