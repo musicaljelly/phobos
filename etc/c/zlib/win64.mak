@@ -7,7 +7,13 @@ CC=$(VCDIR)\bin\amd64\cl
 LD=$(VCDIR)\bin\amd64\link
 LIB=$(VCDIR)\bin\amd64\lib
 
-CFLAGS=/O2 /nologo /I"$(VCDIR)\INCLUDE"
+# !!!
+## Visual C directories
+VCDIR=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29333
+SDKDIR=C:\Program Files (x86)\Windows Kits\10\Include\10.0.18362.0
+# !!!
+
+CFLAGS=/O2 /nologo /I"$(VCDIR)\INCLUDE" /I"$(SDKDIR)\ucrt"
 LIBFLAGS=/nologo
 LDFLAGS=/nologo
 O=.obj

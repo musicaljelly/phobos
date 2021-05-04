@@ -1,3 +1,10 @@
+# LEWIS NOTE: win64.mak appears to be in total disrepair, I had to make a number of changes to it to get it to work.
+# Notably, I had to manually set the VCDIR and SDKDIR paths, and those paths seem fragile. My guess is the next
+# VS or Win10 SDK update will require me to update them.
+# I also had to update etc/c/zlib/win64.mak similarly (and add the SDK path there too so stddef.h was found).
+# It also looks like if I ever want to build this in release I should change a couple of the flags, but that's not a big
+# priority given that my final shipping release build will be built with LDC.
+
 # Makefile to build D runtime library phobos64.lib for Win64
 # Prerequisites:
 #	Microsoft Visual Studio
@@ -28,14 +35,16 @@ CP=cp
 
 DIR=\dmd2
 
+# !!!
 ## Visual C directories
-VCDIR=\Program Files (x86)\Microsoft Visual Studio 10.0\VC
-SDKDIR=\Program Files (x86)\Microsoft SDKs\Windows\v7.0A
+VCDIR=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.28.29910
+SDKDIR=C:\Program Files (x86)\Windows Kits\10\Include\10.0.18362.0
+# !!!
 
 ## Flags for VC compiler
 
-#CFLAGS=/Zi /nologo /I"$(VCDIR)\INCLUDE" /I"$(SDKDIR)\Include"
-CFLAGS=/O2 /nologo /I"$(VCDIR)\INCLUDE" /I"$(SDKDIR)\Include"
+CFLAGS=/Zi /nologo /I"$(VCDIR)\INCLUDE" /I"$(SDKDIR)\ucrt"
+#CFLAGS=/O2 /nologo /I"$(VCDIR)\INCLUDE" /I"$(SDKDIR)\Include"
 
 ## Location of druntime tree
 
@@ -44,7 +53,10 @@ DRUNTIMELIB=$(DRUNTIME)/lib/druntime$(MODEL).lib
 
 ## Flags for dmd D compiler
 
-DFLAGS=-conf= -m$(MODEL) -O -release -w -de -preview=dip1000 -preview=dtorfields -transition=complex -I$(DRUNTIME)\import
+# !!!
+# Removed release-specific flags
+DFLAGS=-conf= -m$(MODEL) -w -de -preview=dip1000 -preview=dtorfields -transition=complex -I$(DRUNTIME)\import
+# !!!
 #DFLAGS=-m$(MODEL) -unittest -g
 #DFLAGS=-m$(MODEL) -unittest -cov -g
 
@@ -54,17 +66,22 @@ UDFLAGS=-conf= -g -m$(MODEL) -O -w -preview=dip1000 -transition=complex -I$(DRUN
 
 ## C compiler, linker, librarian
 
-CC=$(VCDIR)\bin\amd64\cl
-LD=$(VCDIR)\bin\amd64\link
-AR=$(VCDIR)\bin\amd64\lib
-MAKE=make
+# !!!
+BINDIR=$(VCDIR)\bin\Hostx64\x64
+CC=$(BINDIR)\cl
+LD=$(BINDIR)\link
+AR=$(BINDIR)\lib
+MAKE=W:\tools\DMmake.exe
+# !!!
 
 ## D compiler
 
 DMD_DIR=../dmd
 BUILD=release
 OS=windows
-DMD=$(DMD_DIR)/generated/$(OS)/$(BUILD)/$(MODEL)/dmd
+# !!!
+DMD=W:\external\DMD\windows\bin\dmd.exe
+# !!!
 
 ## Zlib library
 
@@ -388,6 +405,23 @@ SRC_ZLIB= \
 	etc\c\zlib\win64.mak \
 	etc\c\zlib\linux.mak \
 	etc\c\zlib\osx.mak
+
+# !!!
+
+# IMPORTANT: Building phobos with -inline doesn't seem to work, and I don't know why. It causes a crash during startup in
+# main->DebugUtil.initLogging()->GetTimestampForFilename(), fairly deep in doing a cast of a SysTime or something of the sort.
+# This feels like it may be a bug in DMD/phobos, but I notice that the official D makefile for phobos does not compile it
+# with -inline. So I will follow its lead and not do so either.
+release : $(SRC_TO_COMPILE) \
+	$(ZLIB) $(DRUNTIMELIB) win32.mak win64.mak
+	$(DMD) -lib -of$(LIB) -Xfphobos.json $(DFLAGS) -O -release $(SRC_TO_COMPILE) \
+		$(ZLIB) $(DRUNTIMELIB)
+        
+debug : $(SRC_TO_COMPILE) \
+	$(ZLIB) $(DRUNTIMELIB) win32.mak win64.mak
+	$(DMD) -lib -of$(LIB) -Xfphobos.json $(DFLAGS) -g -gs -gf -debug=GameDebug $(SRC_TO_COMPILE) \
+		$(ZLIB) $(DRUNTIMELIB)
+# !!!
 
 $(LIB) : $(SRC_TO_COMPILE) \
 	$(ZLIB) $(DRUNTIMELIB) win32.mak win64.mak

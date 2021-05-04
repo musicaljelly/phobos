@@ -7490,18 +7490,6 @@ struct Typedef(T, T init = T.init, string cookie=null)
         return cast(T2) Typedef_payload;
     }
 
-    // !!!
-    import std.traits : isScalarType;
-    static if (isScalarType!T)
-    {
-        string toString()
-        {
-            import std.conv : to;
-            return to!string(Typedef_payload);
-        }
-    }
-    // !!!
-
     mixin Proxy!Typedef_payload;
 
     pure nothrow @nogc @safe @property
@@ -7533,7 +7521,12 @@ struct Typedef(T, T init = T.init, string cookie=null)
     /**
      * Convert wrapped value to a human readable string
      */
-    string toString(this T)()
+    // !!!
+    // Made the toString() implementations here not templated on `this T`.
+    // I don't know why they were marked as such, they don't actually use T, and it causes the following problems:
+    // - toString() calls toString(W)() without doing this.toString(), so the template resolution on toString(W) wouldn't work if toString() was invoked.
+    // - TypeInfo_Struct.xtoString will be null if the toString() template was never instantiated by anyone. But I need it to not be null so that C-style formatting works.
+    string toString()
     {
         import std.array : appender;
         auto app = appender!string();
@@ -7543,11 +7536,12 @@ struct Typedef(T, T init = T.init, string cookie=null)
     }
 
     /// ditto
-    void toString(this T, W)(ref W writer, scope const ref FormatSpec!char fmt)
+    void toString(W)(ref W writer, scope const ref FormatSpec!char fmt)
     if (isOutputRange!(W, char))
     {
         formatValue(writer, Typedef_payload, fmt);
     }
+    // !!!
 
     ///
     @safe unittest
