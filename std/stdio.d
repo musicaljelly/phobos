@@ -37,69 +37,59 @@ else version (CRuntime_DigitalMars)
     // Specific to the way Digital Mars C does stdio
     version = DIGITAL_MARS_STDIO;
 }
-
-version (CRuntime_Glibc)
+else version (CRuntime_Glibc)
 {
     // Specific to the way Gnu C does stdio
     version = GCC_IO;
-    version = HAS_GETDELIM;
 }
 else version (CRuntime_Bionic)
 {
     version = GENERIC_IO;
-    version = HAS_GETDELIM;
 }
 else version (CRuntime_Musl)
 {
     version = GENERIC_IO;
-    version = HAS_GETDELIM;
 }
 else version (CRuntime_UClibc)
 {
     // uClibc supports GCC IO
     version = GCC_IO;
-    version = HAS_GETDELIM;
 }
-
-version (OSX)
+else version (OSX)
 {
     version = GENERIC_IO;
-    version = HAS_GETDELIM;
 }
 else version (iOS)
 {
     version = GENERIC_IO;
-    version = HAS_GETDELIM;
 }
 else version (TVOS)
 {
     version = GENERIC_IO;
-    version = HAS_GETDELIM;
 }
 else version (WatchOS)
 {
     version = GENERIC_IO;
-    version = HAS_GETDELIM;
 }
 else version (FreeBSD)
 {
     version = GENERIC_IO;
-    version = HAS_GETDELIM;
 }
 else version (NetBSD)
 {
     version = GENERIC_IO;
-    version = HAS_GETDELIM;
+}
+else version (OpenBSD)
+{
+    version = GENERIC_IO;
 }
 else version (DragonFlyBSD)
 {
     version = GENERIC_IO;
-    version = HAS_GETDELIM;
 }
 else version (Solaris)
 {
     version = GENERIC_IO;
-    version = NO_GETDELIM;
 }
 
 // Character type used for operating system filesystem APIs
@@ -123,6 +113,11 @@ version (Windows)
     extern (C) nothrow @nogc FILE* _wfreopen(in wchar* filename, in wchar* mode, FILE* fp);
 
     import core.sys.windows.basetsd : HANDLE;
+}
+
+version (Posix)
+{
+    static import core.sys.posix.stdio; // getdelim
 }
 
 version (DIGITAL_MARS_STDIO)
@@ -188,6 +183,12 @@ else version (MICROSOFT_STDIO)
 
     alias setmode = _setmode;
     alias fileno = _fileno;
+    enum
+    {
+        _O_WTEXT = 0x10000,
+        _O_U16TEXT = 0x20000,
+        _O_U8TEXT = 0x40000,
+    }
 }
 else version (GCC_IO)
 {
@@ -255,11 +256,19 @@ else
     static assert(0, "unsupported C I/O system");
 }
 
-version (HAS_GETDELIM) extern(C) nothrow @nogc
+static if (__traits(compiles, core.sys.posix.stdio.getdelim))
 {
-    ptrdiff_t getdelim(char**, size_t*, int, FILE*);
-    // getline() always comes together with getdelim()
-    ptrdiff_t getline(char**, size_t*, FILE*);
+    extern(C) nothrow @nogc
+    {
+        // @@@DEPRECATED_2.104@@@
+        deprecated("To be removed after 2.104. Use core.sys.posix.stdio.getdelim instead.")
+        ptrdiff_t getdelim(char**, size_t*, int, FILE*);
+
+        // @@@DEPRECATED_2.104@@@
+        // getline() always comes together with getdelim()
+        deprecated("To be removed after 2.104. Use core.sys.posix.stdio.getline instead.")
+        ptrdiff_t getline(char**, size_t*, FILE*);
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -1331,7 +1340,7 @@ Throws: `Exception` if the file is not opened.
                 liLength.HighPart, &overlapped);
         }
 
-        private static T wenforce(T)(T cond, string str)
+        private static T wenforce(T)(T cond, lazy string str)
         {
             import core.sys.windows.winbase : GetLastError;
             import std.windows.syserror : sysErrorString;
@@ -1492,8 +1501,9 @@ Removes the lock over the specified file segment.
     }
 
     version (Posix)
-    static if (__traits(compiles, { import std.process : spawnProcess; }))
     @system unittest
+    {
+    static if (__traits(compiles, { import std.process : spawnProcess; }))
     {
         static import std.file;
         auto deleteme = testFilename();
@@ -1547,7 +1557,8 @@ Removes the lock over the specified file segment.
             g.unlock();
         });
         f.unlock();
-    }
+    } // static if
+    } // unittest
 
 
 /**
@@ -1843,14 +1854,19 @@ is recommended if you want to process a complete file.
         }
         else
         {
-            // TODO: optimize this
             string s = readln(terminator);
-            buf.length = 0;
-            if (!s.length) return 0;
-            foreach (C c; s)
+            if (!s.length)
             {
-                buf ~= c;
+                buf = buf[0 .. 0];
+                return 0;
             }
+
+            import std.utf : codeLength;
+            buf.length = codeLength!C(s);
+            size_t idx;
+            foreach (C c; s)
+                buf[idx++] = c;
+
             return buf.length;
         }
     }
@@ -1954,7 +1970,7 @@ is recommended if you want to process a complete file.
     /**
      * Reads formatted _data from the file using $(REF formattedRead, std,_format).
      * Params:
-     * format = The $(REF_ALTTEXT format string, formattedWrite, std _format).
+     * format = The $(REF_ALTTEXT format string, formattedWrite, std, _format).
      * When passed as a compile-time argument, the string will be statically checked
      * against the argument types passed.
      * data = Items to be read.
@@ -2922,7 +2938,7 @@ is empty, throws an `Exception`. In case of an I/O error throws
         // the file's orientation (byte- or wide-oriented)
         int orientation_;
 
-        // A buffer for when we need to transcode.
+        // Buffers for when we need to transcode.
         wchar highSurrogate = '\0'; // '\0' indicates empty
         void highSurrogateShouldBeEmpty() @safe
         {
@@ -2930,17 +2946,38 @@ is empty, throws an `Exception`. In case of an I/O error throws
             if (highSurrogate != '\0')
                 throw new UTFException("unpaired surrogate UTF-16 value");
         }
+        char[4] rbuf8;
+        size_t rbuf8Filled = 0;
     public:
 
         this(ref File f) @trusted
         {
-            import core.stdc.wchar_ : fwide;
             import std.exception : enforce;
 
             enforce(f._p && f._p.handle, "Attempting to write to closed File");
             file_ = f;
             FILE* fps = f._p.handle;
-            orientation_ = fwide(fps, 0);
+
+            version (MICROSOFT_STDIO)
+            {
+                // Microsoft doesn't implement fwide. Instead, there's the
+                // concept of ANSI/UNICODE mode. fputc doesn't work in UNICODE
+                // mode; fputwc has to be used. So that essentially means
+                // "wide-oriented" for us.
+                immutable int mode = _setmode(f.fileno, _O_TEXT);
+                    // Set some arbitrary mode to obtain the previous one.
+                _setmode(f.fileno, mode); // Restore previous mode.
+                if (mode & (_O_WTEXT | _O_U16TEXT | _O_U8TEXT))
+                {
+                    orientation_ = 1; // wide
+                }
+            }
+            else
+            {
+                import core.stdc.wchar_ : fwide;
+                orientation_ = fwide(fps, 0);
+            }
+
             FLOCK(fps);
         }
 
@@ -3001,6 +3038,7 @@ is empty, throws an `Exception`. In case of an I/O error throws
         void put(C)(scope C c) @safe if (isSomeChar!C || is(C : const(ubyte)))
         {
             import std.traits : Parameters;
+            import std.utf : decodeFront, encode, stride;
             static auto trustedFPUTC(int ch, _iobuf* h) @trusted
             {
                 return FPUTC(ch, h);
@@ -3012,46 +3050,70 @@ is empty, throws an `Exception`. In case of an I/O error throws
 
             static if (c.sizeof == 1)
             {
-                // simple char
                 highSurrogateShouldBeEmpty();
                 if (orientation_ <= 0) trustedFPUTC(c, handle_);
-                else trustedFPUTWC(c, handle_);
+                else if (c <= 0x7F) trustedFPUTWC(c, handle_);
+                else if (c >= 0b1100_0000) // start byte of multibyte sequence
+                {
+                    rbuf8[0] = c;
+                    rbuf8Filled = 1;
+                }
+                else // continuation byte of multibyte sequence
+                {
+                    rbuf8[rbuf8Filled] = c;
+                    ++rbuf8Filled;
+                    if (stride(rbuf8[]) == rbuf8Filled) // sequence is complete
+                    {
+                        char[] str = rbuf8[0 .. rbuf8Filled];
+                        immutable dchar d = decodeFront(str);
+                        wchar_t[4 / wchar_t.sizeof] wbuf;
+                        immutable size = encode(wbuf, d);
+                        foreach (i; 0 .. size)
+                            trustedFPUTWC(wbuf[i], handle_);
+                        rbuf8Filled = 0;
+                    }
+                }
             }
             else static if (c.sizeof == 2)
             {
-                import std.utf : encode, decode;
+                import std.utf : decode;
 
-                if (orientation_ <= 0)
+                if (c <= 0x7F)
                 {
-                    if (c <= 0x7F)
+                    highSurrogateShouldBeEmpty();
+                    if (orientation_ <= 0) trustedFPUTC(c, handle_);
+                    else trustedFPUTWC(c, handle_);
+                }
+                else if (0xD800 <= c && c <= 0xDBFF) // high surrogate
+                {
+                    highSurrogateShouldBeEmpty();
+                    highSurrogate = c;
+                }
+                else // standalone or low surrogate
+                {
+                    dchar d = c;
+                    if (highSurrogate != '\0')
                     {
-                        highSurrogateShouldBeEmpty();
-                        trustedFPUTC(c, handle_);
+                        immutable wchar[2] rbuf = [highSurrogate, c];
+                        size_t index = 0;
+                        d = decode(rbuf[], index);
+                        highSurrogate = 0;
                     }
-                    else if (0xD800 <= c && c <= 0xDBFF) // high surrogate
+                    if (orientation_ <= 0)
                     {
-                        highSurrogateShouldBeEmpty();
-                        highSurrogate = c;
-                    }
-                    else // standalone or low surrogate
-                    {
-                        dchar d = c;
-                        if (highSurrogate != '\0')
-                        {
-                            immutable wchar[2] rbuf = [highSurrogate, c];
-                            size_t index = 0;
-                            d = decode(rbuf[], index);
-                            highSurrogate = 0;
-                        }
                         char[4] wbuf;
                         immutable size = encode(wbuf, d);
                         foreach (i; 0 .. size)
                             trustedFPUTC(wbuf[i], handle_);
                     }
-                }
-                else
-                {
-                    trustedFPUTWC(c, handle_);
+                    else
+                    {
+                        wchar_t[4 / wchar_t.sizeof] wbuf;
+                        immutable size = encode(wbuf, d);
+                        foreach (i; 0 .. size)
+                            trustedFPUTWC(wbuf[i], handle_);
+                    }
+                    rbuf8Filled = 0;
                 }
             }
             else // 32-bit characters
@@ -3149,8 +3211,10 @@ is empty, throws an `Exception`. In case of an I/O error throws
                 ubyte oldInfo;
         }
 
-    package:
-        this(ref File f)
+    public:
+        // Don't use this, but `File.lockingBinaryWriter()` instead.
+        // Must be public for RefCounted and emplace() in druntime.
+        this(scope ref File f)
         {
             import std.exception : enforce;
             file_ = f;
@@ -3176,7 +3240,6 @@ is empty, throws an `Exception`. In case of an I/O error throws
             }
         }
 
-    public:
         ~this()
         {
             if (!file_._p || !file_._p.handle)
@@ -3601,6 +3664,95 @@ void main()
         assertThrown!UTFException(writer.put(surr));
     }
     assert(std.file.readText!string(deleteme) == "y");
+}
+
+@safe unittest // issue 18801
+{
+    static import std.file;
+    import std.string : stripLeft;
+
+    auto deleteme = testFilename();
+    scope(exit) std.file.remove(deleteme);
+
+    {
+        auto writer = File(deleteme, "w,ccs=UTF-8").lockingTextWriter();
+        writer.put("foo");
+    }
+    assert(std.file.readText!string(deleteme).stripLeft("\uFEFF") == "foo");
+
+    {
+        auto writer = File(deleteme, "a,ccs=UTF-8").lockingTextWriter();
+        writer.put("bar");
+    }
+    assert(std.file.readText!string(deleteme).stripLeft("\uFEFF") == "foobar");
+}
+@safe unittest // char/wchar -> wchar_t
+{
+    import core.stdc.locale : LC_CTYPE, setlocale;
+    import core.stdc.wchar_ : fwide;
+    import core.stdc.string : strlen;
+    import std.algorithm.searching : any, endsWith;
+    import std.conv : text;
+    import std.meta : AliasSeq;
+    import std.string : fromStringz, stripLeft;
+    static import std.file;
+    auto deleteme = testFilename();
+    scope(exit) std.file.remove(deleteme);
+    const char* oldCt = () @trusted {
+        const(char)* p = setlocale(LC_CTYPE, null);
+        // Subsequent calls to `setlocale` might invalidate this return value,
+        // so duplicate it.
+        // See: https://github.com/dlang/phobos/pull/7660
+        return p ? p[0 .. strlen(p) + 1].idup.ptr : null;
+    }();
+    const utf8 = ["en_US.UTF-8", "C.UTF-8", ".65001"].any!((loc) @trusted {
+        return setlocale(LC_CTYPE, loc.ptr).fromStringz.endsWith(loc);
+    });
+    scope(exit) () @trusted { setlocale(LC_CTYPE, oldCt); } ();
+    version (DIGITAL_MARS_STDIO) // DM can't handle Unicode above U+07FF.
+    {
+        alias strs = AliasSeq!("xä\u07FE", "yö\u07FF"w);
+    }
+    else
+    {
+        alias strs = AliasSeq!("xä\U0001F607", "yö\U0001F608"w);
+    }
+    {
+        auto f = File(deleteme, "w");
+        version (MICROSOFT_STDIO)
+        {
+            () @trusted { setmode(fileno(f.getFP()), _O_U8TEXT); } ();
+        }
+        else
+        {
+            assert(fwide(f.getFP(), 1) == 1);
+        }
+        auto writer = f.lockingTextWriter();
+        assert(writer.orientation_ == 1);
+        static foreach (s; strs) writer.put(s);
+    }
+    assert(std.file.readText!string(deleteme).stripLeft("\uFEFF") ==
+        text(strs));
+}
+@safe unittest // https://issues.dlang.org/show_bug.cgi?id=18789
+{
+    static import std.file;
+    auto deleteme = testFilename();
+    scope(exit) std.file.remove(deleteme);
+    // converting to char
+    {
+        auto f = File(deleteme, "w");
+        f.writeln("\U0001F608"w); // UTFException
+    }
+    // converting to wchar_t
+    {
+        auto f = File(deleteme, "w,ccs=UTF-16LE");
+        // from char
+        f.writeln("ö"); // writes garbage
+        f.writeln("\U0001F608"); // ditto
+        // from wchar
+        f.writeln("\U0001F608"w); // leads to ErrnoException
+    }
 }
 
 @safe unittest
@@ -5127,59 +5279,142 @@ private struct ReadlnAppender
 }
 
 // Private implementation of readln
-version (DIGITAL_MARS_STDIO)
-private size_t readlnImpl(FILE* fps, ref char[] buf, dchar terminator, File.Orientation /*ignored*/)
+private size_t readlnImpl(FILE* fps, ref char[] buf, dchar terminator, File.Orientation orientation)
 {
-    FLOCK(fps);
-    scope(exit) FUNLOCK(fps);
+    version (DIGITAL_MARS_STDIO)
+    {
+        FLOCK(fps);
+        scope(exit) FUNLOCK(fps);
 
-    /* Since fps is now locked, we can create an "unshared" version
-     * of fp.
-     */
-    auto fp = cast(_iobuf*) fps;
-
-    ReadlnAppender app;
-    app.initialize(buf);
-
-    if (__fhnd_info[fp._file] & FHND_WCHAR)
-    {   /* Stream is in wide characters.
-         * Read them and convert to chars.
+        /* Since fps is now locked, we can create an "unshared" version
+         * of fp.
          */
-        static assert(wchar_t.sizeof == 2);
-        for (int c = void; (c = FGETWC(fp)) != -1; )
+        auto fp = cast(_iobuf*) fps;
+
+        ReadlnAppender app;
+        app.initialize(buf);
+
+        if (__fhnd_info[fp._file] & FHND_WCHAR)
+        {   /* Stream is in wide characters.
+             * Read them and convert to chars.
+             */
+            static assert(wchar_t.sizeof == 2);
+            for (int c = void; (c = FGETWC(fp)) != -1; )
+            {
+                if ((c & ~0x7F) == 0)
+                {
+                    app.putchar(cast(char) c);
+                    if (c == terminator)
+                        break;
+                }
+                else
+                {
+                    if (c >= 0xD800 && c <= 0xDBFF)
+                    {
+                        int c2 = void;
+                        if ((c2 = FGETWC(fp)) != -1 ||
+                                c2 < 0xDC00 && c2 > 0xDFFF)
+                        {
+                            StdioException("unpaired UTF-16 surrogate");
+                        }
+                        c = ((c - 0xD7C0) << 10) + (c2 - 0xDC00);
+                    }
+                    app.putdchar(cast(dchar) c);
+                }
+            }
+            if (ferror(fps))
+                StdioException();
+        }
+
+        else if (fp._flag & _IONBF)
         {
-            if ((c & ~0x7F) == 0)
+            /* Use this for unbuffered I/O, when running
+             * across buffer boundaries, or for any but the common
+             * cases.
+             */
+        L1:
+            int c;
+            while ((c = FGETC(fp)) != -1)
             {
                 app.putchar(cast(char) c);
                 if (c == terminator)
-                    break;
+                {
+                    buf = app.data;
+                    return buf.length;
+                }
+
+            }
+
+            if (ferror(fps))
+                StdioException();
+        }
+        else
+        {
+            int u = fp._cnt;
+            char* p = fp._ptr;
+            int i;
+            if (fp._flag & _IOTRAN)
+            {   /* Translated mode ignores \r and treats ^Z as end-of-file
+                 */
+                char c;
+                while (1)
+                {
+                    if (i == u)         // if end of buffer
+                        goto L1;        // give up
+                    c = p[i];
+                    i++;
+                    if (c != '\r')
+                    {
+                        if (c == terminator)
+                            break;
+                        if (c != 0x1A)
+                            continue;
+                        goto L1;
+                    }
+                    else
+                    {   if (i != u && p[i] == terminator)
+                            break;
+                        goto L1;
+                    }
+                }
+                app.putonly(p[0 .. i]);
+                app.buf[i - 1] = cast(char) terminator;
+                if (terminator == '\n' && c == '\r')
+                    i++;
             }
             else
             {
-                if (c >= 0xD800 && c <= 0xDBFF)
+                while (1)
                 {
-                    int c2 = void;
-                    if ((c2 = FGETWC(fp)) != -1 ||
-                            c2 < 0xDC00 && c2 > 0xDFFF)
-                    {
-                        StdioException("unpaired UTF-16 surrogate");
-                    }
-                    c = ((c - 0xD7C0) << 10) + (c2 - 0xDC00);
+                    if (i == u)         // if end of buffer
+                        goto L1;        // give up
+                    auto c = p[i];
+                    i++;
+                    if (c == terminator)
+                        break;
                 }
-                app.putdchar(cast(dchar) c);
+                app.putonly(p[0 .. i]);
             }
+            fp._cnt -= i;
+            fp._ptr += i;
         }
-        if (ferror(fps))
-            StdioException();
-    }
 
-    else if (fp._flag & _IONBF)
+        buf = app.data;
+        return buf.length;
+    }
+    else version (MICROSOFT_STDIO)
     {
-        /* Use this for unbuffered I/O, when running
-         * across buffer boundaries, or for any but the common
-         * cases.
+        FLOCK(fps);
+        scope(exit) FUNLOCK(fps);
+
+        /* Since fps is now locked, we can create an "unshared" version
+         * of fp.
          */
-      L1:
+        auto fp = cast(_iobuf*) fps;
+
+        ReadlnAppender app;
+        app.initialize(buf);
+
         int c;
         while ((c = FGETC(fp)) != -1)
         {
@@ -5194,295 +5429,208 @@ private size_t readlnImpl(FILE* fps, ref char[] buf, dchar terminator, File.Orie
 
         if (ferror(fps))
             StdioException();
+        buf = app.data;
+        return buf.length;
     }
-    else
+    else static if (__traits(compiles, core.sys.posix.stdio.getdelim))
     {
-        int u = fp._cnt;
-        char* p = fp._ptr;
-        int i;
-        if (fp._flag & _IOTRAN)
-        {   /* Translated mode ignores \r and treats ^Z as end-of-file
+        import core.stdc.stdlib : free;
+        import core.stdc.wchar_ : fwide;
+
+        if (orientation == File.Orientation.wide)
+        {
+            /* Stream is in wide characters.
+             * Read them and convert to chars.
              */
-            char c;
-            while (1)
+            FLOCK(fps);
+            scope(exit) FUNLOCK(fps);
+            auto fp = cast(_iobuf*) fps;
+            version (Windows)
             {
-                if (i == u)         // if end of buffer
-                    goto L1;        // give up
-                c = p[i];
-                i++;
-                if (c != '\r')
+                buf.length = 0;
+                for (int c = void; (c = FGETWC(fp)) != -1; )
                 {
+                    if ((c & ~0x7F) == 0)
+                    {   buf ~= c;
+                        if (c == terminator)
+                            break;
+                    }
+                    else
+                    {
+                        if (c >= 0xD800 && c <= 0xDBFF)
+                        {
+                            int c2 = void;
+                            if ((c2 = FGETWC(fp)) != -1 ||
+                                    c2 < 0xDC00 && c2 > 0xDFFF)
+                            {
+                                StdioException("unpaired UTF-16 surrogate");
+                            }
+                            c = ((c - 0xD7C0) << 10) + (c2 - 0xDC00);
+                        }
+                        import std.utf : encode;
+                        encode(buf, c);
+                    }
+                }
+                if (ferror(fp))
+                    StdioException();
+                return buf.length;
+            }
+            else version (Posix)
+            {
+                buf.length = 0;
+                for (int c; (c = FGETWC(fp)) != -1; )
+                {
+                    import std.utf : encode;
+
+                    if ((c & ~0x7F) == 0)
+                        buf ~= cast(char) c;
+                    else
+                        encode(buf, cast(dchar) c);
                     if (c == terminator)
                         break;
-                    if (c != 0x1A)
-                        continue;
-                    goto L1;
                 }
-                else
-                {   if (i != u && p[i] == terminator)
-                        break;
-                    goto L1;
-                }
+                if (ferror(fps))
+                    StdioException();
+                return buf.length;
             }
-            app.putonly(p[0 .. i]);
-            app.buf[i - 1] = cast(char) terminator;
-            if (terminator == '\n' && c == '\r')
-                i++;
+            else
+            {
+                static assert(0);
+            }
+        }
+
+        static char *lineptr = null;
+        static size_t n = 0;
+        scope(exit)
+        {
+            if (n > 128 * 1024)
+            {
+                // Bound memory used by readln
+                free(lineptr);
+                lineptr = null;
+                n = 0;
+            }
+        }
+
+        auto s = core.sys.posix.stdio.getdelim(&lineptr, &n, terminator, fps);
+        if (s < 0)
+        {
+            if (ferror(fps))
+                StdioException();
+            buf.length = 0;                // end of file
+            return 0;
+        }
+
+        if (s <= buf.length)
+        {
+            buf = buf[0 .. s];
+            buf[] = lineptr[0 .. s];
         }
         else
         {
-            while (1)
-            {
-                if (i == u)         // if end of buffer
-                    goto L1;        // give up
-                auto c = p[i];
-                i++;
-                if (c == terminator)
-                    break;
-            }
-            app.putonly(p[0 .. i]);
+            buf = lineptr[0 .. s].dup;
         }
-        fp._cnt -= i;
-        fp._ptr += i;
+        return s;
     }
-
-    buf = app.data;
-    return buf.length;
-}
-
-version (MICROSOFT_STDIO)
-private size_t readlnImpl(FILE* fps, ref char[] buf, dchar terminator, File.Orientation /*ignored*/)
-{
-    FLOCK(fps);
-    scope(exit) FUNLOCK(fps);
-
-    /* Since fps is now locked, we can create an "unshared" version
-     * of fp.
-     */
-    auto fp = cast(_iobuf*) fps;
-
-    ReadlnAppender app;
-    app.initialize(buf);
-
-    int c;
-    while ((c = FGETC(fp)) != -1)
+    else // version (NO_GETDELIM)
     {
-        app.putchar(cast(char) c);
-        if (c == terminator)
-        {
-            buf = app.data;
-            return buf.length;
-        }
+        import core.stdc.wchar_ : fwide;
 
-    }
-
-    if (ferror(fps))
-        StdioException();
-    buf = app.data;
-    return buf.length;
-}
-
-version (HAS_GETDELIM)
-private size_t readlnImpl(FILE* fps, ref char[] buf, dchar terminator, File.Orientation orientation)
-{
-    import core.stdc.stdlib : free;
-    import core.stdc.wchar_ : fwide;
-
-    if (orientation == File.Orientation.wide)
-    {
-        /* Stream is in wide characters.
-         * Read them and convert to chars.
-         */
         FLOCK(fps);
         scope(exit) FUNLOCK(fps);
         auto fp = cast(_iobuf*) fps;
-        version (Windows)
+        if (orientation == File.Orientation.wide)
         {
-            buf.length = 0;
-            for (int c = void; (c = FGETWC(fp)) != -1; )
+            /* Stream is in wide characters.
+             * Read them and convert to chars.
+             */
+            version (Windows)
             {
-                if ((c & ~0x7F) == 0)
-                {   buf ~= c;
-                    if (c == terminator)
-                        break;
-                }
-                else
+                buf.length = 0;
+                for (int c; (c = FGETWC(fp)) != -1; )
                 {
-                    if (c >= 0xD800 && c <= 0xDBFF)
-                    {
-                        int c2 = void;
-                        if ((c2 = FGETWC(fp)) != -1 ||
-                                c2 < 0xDC00 && c2 > 0xDFFF)
-                        {
-                            StdioException("unpaired UTF-16 surrogate");
-                        }
-                        c = ((c - 0xD7C0) << 10) + (c2 - 0xDC00);
+                    if ((c & ~0x7F) == 0)
+                    {   buf ~= c;
+                        if (c == terminator)
+                            break;
                     }
-                    import std.utf : encode;
-                    encode(buf, c);
+                    else
+                    {
+                        if (c >= 0xD800 && c <= 0xDBFF)
+                        {
+                            int c2 = void;
+                            if ((c2 = FGETWC(fp)) != -1 ||
+                                    c2 < 0xDC00 && c2 > 0xDFFF)
+                            {
+                                StdioException("unpaired UTF-16 surrogate");
+                            }
+                            c = ((c - 0xD7C0) << 10) + (c2 - 0xDC00);
+                        }
+                        import std.utf : encode;
+                        encode(buf, c);
+                    }
                 }
+                if (ferror(fp))
+                    StdioException();
+                return buf.length;
             }
-            if (ferror(fp))
-                StdioException();
-            return buf.length;
-        }
-        else version (Posix)
-        {
-            buf.length = 0;
-            for (int c; (c = FGETWC(fp)) != -1; )
+            else version (Posix)
             {
                 import std.utf : encode;
-
-                if ((c & ~0x7F) == 0)
-                    buf ~= cast(char) c;
-                else
-                    encode(buf, cast(dchar) c);
-                if (c == terminator)
-                    break;
-            }
-            if (ferror(fps))
-                StdioException();
-            return buf.length;
-        }
-        else
-        {
-            static assert(0);
-        }
-    }
-
-    static char *lineptr = null;
-    static size_t n = 0;
-    scope(exit)
-    {
-        if (n > 128 * 1024)
-        {
-            // Bound memory used by readln
-            free(lineptr);
-            lineptr = null;
-            n = 0;
-        }
-    }
-
-    auto s = getdelim(&lineptr, &n, terminator, fps);
-    if (s < 0)
-    {
-        if (ferror(fps))
-            StdioException();
-        buf.length = 0;                // end of file
-        return 0;
-    }
-
-    if (s <= buf.length)
-    {
-        buf = buf[0 .. s];
-        buf[] = lineptr[0 .. s];
-    }
-    else
-    {
-        buf = lineptr[0 .. s].dup;
-    }
-    return s;
-}
-
-version (NO_GETDELIM)
-private size_t readlnImpl(FILE* fps, ref char[] buf, dchar terminator, File.Orientation orientation)
-{
-    import core.stdc.wchar_ : fwide;
-
-    FLOCK(fps);
-    scope(exit) FUNLOCK(fps);
-    auto fp = cast(_iobuf*) fps;
-    if (orientation == File.Orientation.wide)
-    {
-        /* Stream is in wide characters.
-         * Read them and convert to chars.
-         */
-        version (Windows)
-        {
-            buf.length = 0;
-            for (int c; (c = FGETWC(fp)) != -1; )
-            {
-                if ((c & ~0x7F) == 0)
-                {   buf ~= c;
+                buf.length = 0;
+                for (int c; (c = FGETWC(fp)) != -1; )
+                {
+                    if ((c & ~0x7F) == 0)
+                        buf ~= cast(char) c;
+                    else
+                        encode(buf, cast(dchar) c);
                     if (c == terminator)
                         break;
                 }
-                else
-                {
-                    if (c >= 0xD800 && c <= 0xDBFF)
-                    {
-                        int c2 = void;
-                        if ((c2 = FGETWC(fp)) != -1 ||
-                                c2 < 0xDC00 && c2 > 0xDFFF)
-                        {
-                            StdioException("unpaired UTF-16 surrogate");
-                        }
-                        c = ((c - 0xD7C0) << 10) + (c2 - 0xDC00);
-                    }
-                    import std.utf : encode;
-                    encode(buf, c);
-                }
+                if (ferror(fps))
+                    StdioException();
+                return buf.length;
             }
-            if (ferror(fp))
-                StdioException();
-            return buf.length;
-        }
-        else version (Posix)
-        {
-            import std.utf : encode;
-            buf.length = 0;
-            for (int c; (c = FGETWC(fp)) != -1; )
+            else
             {
-                if ((c & ~0x7F) == 0)
-                    buf ~= cast(char) c;
-                else
-                    encode(buf, cast(dchar) c);
-                if (c == terminator)
-                    break;
+                static assert(0);
             }
-            if (ferror(fps))
-                StdioException();
-            return buf.length;
         }
-        else
-        {
-            static assert(0);
-        }
-    }
 
-    // Narrow stream
-    // First, fill the existing buffer
-    for (size_t bufPos = 0; bufPos < buf.length; )
-    {
-        immutable c = FGETC(fp);
-        if (c == -1)
+        // Narrow stream
+        // First, fill the existing buffer
+        for (size_t bufPos = 0; bufPos < buf.length; )
         {
-            buf.length = bufPos;
-            goto endGame;
+            immutable c = FGETC(fp);
+            if (c == -1)
+            {
+                buf.length = bufPos;
+                goto endGame;
+            }
+            buf[bufPos++] = cast(char) c;
+            if (c == terminator)
+            {
+                // No need to test for errors in file
+                buf.length = bufPos;
+                return bufPos;
+            }
         }
-        buf[bufPos++] = cast(char) c;
-        if (c == terminator)
+        // Then, append to it
+        for (int c; (c = FGETC(fp)) != -1; )
         {
-            // No need to test for errors in file
-            buf.length = bufPos;
-            return bufPos;
+            buf ~= cast(char) c;
+            if (c == terminator)
+            {
+                // No need to test for errors in file
+                return buf.length;
+            }
         }
-    }
-    // Then, append to it
-    for (int c; (c = FGETC(fp)) != -1; )
-    {
-        buf ~= cast(char) c;
-        if (c == terminator)
-        {
-            // No need to test for errors in file
-            return buf.length;
-        }
-    }
 
-  endGame:
-    if (ferror(fps))
-        StdioException();
-    return buf.length;
+    endGame:
+        if (ferror(fps))
+            StdioException();
+        return buf.length;
+    }
 }
 
 @system unittest

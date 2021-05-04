@@ -1750,6 +1750,20 @@ if (isInputRange!Range && !isInfinite!Range)
     else
     {
         size_t result;
+        static if (autodecodeStrings && isNarrowString!Range)
+        {
+            import std.utf : codeUnitLimit;
+            result = range.length;
+            foreach (const i, const c; range)
+            {
+                if (c >= codeUnitLimit!Range)
+                {
+                    result = i;
+                    break;
+                }
+            }
+            range = range[result .. $];
+        }
         for ( ; !range.empty ; range.popFront() )
             ++result;
         return result;
@@ -1766,6 +1780,20 @@ if (isInputRange!Range)
     else
     {
         size_t result;
+        static if (autodecodeStrings && isNarrowString!Range)
+        {
+            import std.utf : codeUnitLimit;
+            result = upTo > range.length ? range.length : upTo;
+            foreach (const i, const c; range[0 .. result])
+            {
+                if (c >= codeUnitLimit!Range)
+                {
+                    result = i;
+                    break;
+                }
+            }
+            range = range[result .. $];
+        }
         for ( ; result < upTo && !range.empty ; range.popFront() )
             ++result;
         return result;
@@ -2508,4 +2536,19 @@ if (isAutodecodableString!(T[]))
     assert(a.length, "Attempting to fetch the back of an empty array of " ~ T.stringof);
     size_t i = a.length - strideBack(a, a.length);
     return decode(a, i);
+}
+
+/*
+Implements `length` for a range by forwarding it to `member`.
+*/
+package(std) mixin template ImplementLength(alias member)
+{
+    static if (hasLength!(typeof(member)))
+    {
+        @property auto length()
+        {
+            return member.length;
+        }
+        alias opDollar = length;
+    }
 }

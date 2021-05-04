@@ -796,13 +796,24 @@ in
 do
 {
     import std.format : format;
+    import std.meta : allSatisfy;
     import std.typecons : Tuple;
 
     Tuple!(T) ret;
 
     thisInfo.ident.mbox.get((T val) {
         static if (T.length)
-            ret.field = val;
+        {
+            static if (allSatisfy!(isAssignable, T))
+            {
+                ret.field = val;
+            }
+            else
+            {
+                import core.lifetime : emplace;
+                emplace(&ret, val);
+            }
+        }
     },
     (LinkTerminated e) { throw e; },
     (OwnerTerminated e) { throw e; },
@@ -876,6 +887,12 @@ do
     tid.send(1);
     string result = receiveOnly!string();
     assert(result == "Unexpected message type: expected 'string', got 'int'");
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=21663
+@safe unittest
+{
+    alias test = receiveOnly!(string, bool, bool);
 }
 
 /**
@@ -2480,7 +2497,7 @@ private
             }
             if (n)
             {
-                import std.conv : emplace;
+                import core.lifetime : emplace;
                 emplace!Node(n, v);
             }
             else
@@ -2726,4 +2743,28 @@ auto ref initOnce(alias var)(lazy typeof(var) init, Mutex mutex)
     tid.send(x);
     receiveOnly!(bool);
     assert(x[0] == 5);
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=13930
+@system unittest
+{
+    immutable aa = ["0":0];
+    thisTid.send(aa);
+    receiveOnly!(immutable int[string]); // compile error
+}
+
+// https://issues.dlang.org/show_bug.cgi?id=19345
+@system unittest
+{
+    static struct Aggregate { const int a; const int[5] b; }
+    static void t1(Tid mainTid)
+    {
+        const sendMe = Aggregate(42, [1, 2, 3, 4, 5]);
+        mainTid.send(sendMe);
+    }
+
+    spawn(&t1, thisTid);
+    auto result1 = receiveOnly!(const Aggregate)();
+    immutable expected = Aggregate(42, [1, 2, 3, 4, 5]);
+    assert(result1 == expected);
 }

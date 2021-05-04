@@ -986,7 +986,7 @@ if (isFloatingPoint!F)
 ///
 @safe unittest
 {
-    import std.math : approxEqual;
+    import std.math : isClose;
 
     // Average numbers in an array
     double avg(in double[] a)
@@ -998,7 +998,7 @@ if (isFloatingPoint!F)
     }
 
     auto a = [1.0, 2.0, 3.0];
-    assert(approxEqual(avg(a), 2));
+    assert(isClose(avg(a), 2));
 }
 
 /**
@@ -1016,7 +1016,7 @@ template secantMethod(alias fun)
         typeof(fxn) fxn_1;
 
         xn = xn_1;
-        while (!approxEqual(d, 0) && isFinite(d))
+        while (!isClose(d, 0, 0.0, 1e-5) && isFinite(d))
         {
             xn_1 = xn;
             xn -= d;
@@ -1031,14 +1031,14 @@ template secantMethod(alias fun)
 ///
 @safe unittest
 {
-    import std.math : approxEqual, cos;
+    import std.math : isClose, cos;
 
     float f(float x)
     {
         return cos(x) - x*x*x;
     }
     auto x = secantMethod!(f)(0f, 1f);
-    assert(approxEqual(x, 0.865474));
+    assert(isClose(x, 0.865474));
 }
 
 @system unittest
@@ -1051,10 +1051,10 @@ template secantMethod(alias fun)
         return cos(x) - x*x*x;
     }
     immutable x = secantMethod!(f)(0f, 1f);
-    assert(approxEqual(x, 0.865474));
+    assert(isClose(x, 0.865474));
     auto d = &f;
     immutable y = secantMethod!(d)(0f, 1f);
-    assert(approxEqual(y, 0.865474));
+    assert(isClose(y, 0.865474));
 }
 
 
@@ -1093,7 +1093,7 @@ public:
  * www.netlib.org,www.netlib.org) as algorithm TOMS478.
  *
  */
-T findRoot(T, DF, DT)(scope DF f, in T a, in T b,
+T findRoot(T, DF, DT)(scope DF f, const T a, const T b,
     scope DT tolerance) //= (T a, T b) => false)
 if (
     isFloatingPoint!T &&
@@ -1113,7 +1113,7 @@ if (
 }
 
 ///ditto
-T findRoot(T, DF)(scope DF f, in T a, in T b)
+T findRoot(T, DF)(scope DF f, const T a, const T b)
 {
     return findRoot(f, a, b, (T a, T b) => false);
 }
@@ -1151,7 +1151,8 @@ T findRoot(T, DF)(scope DF f, in T a, in T b)
  * root was found, both of the first two elements will contain the
  * root, and the second pair of elements will be 0.
  */
-Tuple!(T, T, R, R) findRoot(T, R, DF, DT)(scope DF f, in T ax, in T bx, in R fax, in R fbx,
+Tuple!(T, T, R, R) findRoot(T, R, DF, DT)(scope DF f,
+    const T ax, const T bx, const R fax, const R fbx,
     scope DT tolerance) // = (T a, T b) => false)
 if (
     isFloatingPoint!T &&
@@ -1458,13 +1459,14 @@ whileloop:
 }
 
 ///ditto
-Tuple!(T, T, R, R) findRoot(T, R, DF)(scope DF f, in T ax, in T bx, in R fax, in R fbx)
+Tuple!(T, T, R, R) findRoot(T, R, DF)(scope DF f,
+    const T ax, const T bx, const R fax, const R fbx)
 {
     return findRoot(f, ax, bx, fax, fbx, (T a, T b) => false);
 }
 
 ///ditto
-T findRoot(T, R)(scope R delegate(T) f, in T a, in T b,
+T findRoot(T, R)(scope R delegate(T) f, const T a, const T b,
     scope bool delegate(T lo, T hi) tolerance = (T a, T b) => false)
 {
     return findRoot!(T, R delegate(T), bool delegate(T lo, T hi))(f, a, b, tolerance);
@@ -1725,10 +1727,10 @@ See_Also: $(LREF findRoot), $(REF isNormal, std,math)
 Tuple!(T, "x", Unqual!(ReturnType!DF), "y", T, "error")
 findLocalMin(T, DF)(
         scope DF f,
-        in T ax,
-        in T bx,
-        in T relTolerance = sqrt(T.epsilon),
-        in T absTolerance = sqrt(T.epsilon),
+        const T ax,
+        const T bx,
+        const T relTolerance = sqrt(T.epsilon),
+        const T absTolerance = sqrt(T.epsilon),
         )
 if (isFloatingPoint!T
     && __traits(compiles, {T _ = DF.init(T.init);}))
@@ -1872,11 +1874,11 @@ do
 ///
 @safe unittest
 {
-    import std.math : approxEqual;
+    import std.math : isClose;
 
     auto ret = findLocalMin((double x) => (x-4)^^2, -1e7, 1e7);
-    assert(ret.x.approxEqual(4.0));
-    assert(ret.y.approxEqual(0.0));
+    assert(ret.x.isClose(4.0));
+    assert(ret.y.isClose(0.0, 0.0, 1e-10));
 }
 
 @safe unittest
@@ -1886,13 +1888,13 @@ do
     {
         {
             auto ret = findLocalMin!T((T x) => (x-4)^^2, T.min_normal, 1e7);
-            assert(ret.x.approxEqual(T(4)));
-            assert(ret.y.approxEqual(T(0)));
+            assert(ret.x.isClose(T(4)));
+            assert(ret.y.isClose(T(0), 0.0, T.epsilon));
         }
         {
             auto ret = findLocalMin!T((T x) => fabs(x-1), -T.max/4, T.max/4, T.min_normal, 2*T.epsilon);
-            assert(approxEqual(ret.x, T(1)));
-            assert(approxEqual(ret.y, T(0)));
+            assert(isClose(ret.x, T(1)));
+            assert(isClose(ret.y, T(0), 0.0, T.epsilon));
             assert(ret.error <= 10 * T.epsilon);
         }
         {
@@ -1914,9 +1916,9 @@ do
         }
         {
             auto ret = findLocalMin!T((T x) => -fabs(x), -1, 1, T.min_normal, 2*T.epsilon);
-            assert(ret.x.fabs.approxEqual(T(1)));
-            assert(ret.y.fabs.approxEqual(T(1)));
-            assert(ret.error.approxEqual(T(0)));
+            assert(ret.x.fabs.isClose(T(1)));
+            assert(ret.y.fabs.isClose(T(1)));
+            assert(ret.error.isClose(T(0), 0.0, 100*T.epsilon));
         }
     }
 }
@@ -2139,7 +2141,7 @@ if (isInputRange!(Range1) && isInputRange!(Range2))
     {{
         T[] a = [ 1.0, 2.0, ];
         T[] b = [ 4.0, 3.0, ];
-        assert(approxEqual(
+        assert(isClose(
                     cosineSimilarity(a, b), 10.0 / sqrt(5.0 * 25),
                     0.01));
     }}
@@ -2336,7 +2338,7 @@ if (isInputRange!(Range1) && isInputRange!(Range2))
 ///
 @safe unittest
 {
-    import std.math : approxEqual;
+    import std.math : isClose;
 
     double[] p = [ 0.0, 0, 0, 1 ];
     assert(kullbackLeiblerDivergence(p, p) == 0);
@@ -2345,8 +2347,8 @@ if (isInputRange!(Range1) && isInputRange!(Range2))
     assert(kullbackLeiblerDivergence(p, p1) == 2);
     assert(kullbackLeiblerDivergence(p1, p) == double.infinity);
     double[] p2 = [ 0.2, 0.2, 0.2, 0.4 ];
-    assert(approxEqual(kullbackLeiblerDivergence(p1, p2), 0.0719281));
-    assert(approxEqual(kullbackLeiblerDivergence(p2, p1), 0.0780719));
+    assert(isClose(kullbackLeiblerDivergence(p1, p2), 0.0719281, 1e-5));
+    assert(isClose(kullbackLeiblerDivergence(p2, p1), 0.0780719, 1e-5));
 }
 
 /**
@@ -2420,17 +2422,17 @@ if (isInputRange!Range1 && isInputRange!Range2 &&
 ///
 @safe unittest
 {
-    import std.math : approxEqual;
+    import std.math : isClose;
 
     double[] p = [ 0.0, 0, 0, 1 ];
     assert(jensenShannonDivergence(p, p) == 0);
     double[] p1 = [ 0.25, 0.25, 0.25, 0.25 ];
     assert(jensenShannonDivergence(p1, p1) == 0);
-    assert(approxEqual(jensenShannonDivergence(p1, p), 0.548795));
+    assert(isClose(jensenShannonDivergence(p1, p), 0.548795, 1e-5));
     double[] p2 = [ 0.2, 0.2, 0.2, 0.4 ];
-    assert(approxEqual(jensenShannonDivergence(p1, p2), 0.0186218));
-    assert(approxEqual(jensenShannonDivergence(p2, p1), 0.0186218));
-    assert(approxEqual(jensenShannonDivergence(p2, p1, 0.005), 0.00602366));
+    assert(isClose(jensenShannonDivergence(p1, p2), 0.0186218, 1e-5));
+    assert(isClose(jensenShannonDivergence(p2, p1), 0.0186218, 1e-5));
+    assert(isClose(jensenShannonDivergence(p2, p1, 0.005), 0.00602366, 1e-5));
 }
 
 /**
@@ -2610,14 +2612,14 @@ if (isRandomAccessRange!(R1) && hasLength!(R1) &&
 ///
 @system unittest
 {
-    import std.math : approxEqual, sqrt;
+    import std.math : isClose, sqrt;
 
     string[] s = ["Hello", "brave", "new", "world"];
     string[] t = ["Hello", "new", "world"];
     assert(gapWeightedSimilarity(s, s, 1) == 15);
     assert(gapWeightedSimilarity(t, t, 1) == 7);
     assert(gapWeightedSimilarity(s, t, 1) == 7);
-    assert(approxEqual(gapWeightedSimilarityNormalized(s, t, 1),
+    assert(isClose(gapWeightedSimilarityNormalized(s, t, 1),
                     7.0 / sqrt(15.0 * 7), 0.01));
 }
 
@@ -2987,64 +2989,70 @@ if (isIntegral!T)
 // This overload is for non-builtin numerical types like BigInt or
 // user-defined types.
 /// ditto
-T gcd(T)(T a, T b)
+auto gcd(T)(T a, T b)
 if (!isIntegral!T &&
         is(typeof(T.init % T.init)) &&
         is(typeof(T.init == 0 || T.init > 0)))
 {
-    import std.algorithm.mutation : swap;
-
-    enum canUseBinaryGcd = is(typeof(() {
-        T t, u;
-        t <<= 1;
-        t >>= 1;
-        t -= u;
-        bool b = (t & 1) == 0;
-        swap(t, u);
-    }));
-
-    assert(a >= 0 && b >= 0);
-
-    // Special cases.
-    if (a == 0)
-        return b;
-    if (b == 0)
-        return a;
-
-    static if (canUseBinaryGcd)
+    static if (!is(T == Unqual!T))
     {
-        uint shift = 0;
-        while ((a & 1) == 0 && (b & 1) == 0)
-        {
-            a >>= 1;
-            b >>= 1;
-            shift++;
-        }
-
-        if ((a & 1) == 0) swap(a, b);
-
-        do
-        {
-            assert((a & 1) != 0);
-            while ((b & 1) == 0)
-                b >>= 1;
-            if (a > b)
-                swap(a, b);
-            b -= a;
-        } while (b);
-
-        return a << shift;
+        return gcd!(Unqual!T)(a, b);
     }
     else
     {
-        // The only thing we have is %; fallback to Euclidean algorithm.
-        while (b != 0)
+        import std.algorithm.mutation : swap;
+        enum canUseBinaryGcd = is(typeof(() {
+            T t, u;
+            t <<= 1;
+            t >>= 1;
+            t -= u;
+            bool b = (t & 1) == 0;
+            swap(t, u);
+        }));
+
+        assert(a >= 0 && b >= 0);
+
+        // Special cases.
+        if (a == 0)
+            return b;
+        if (b == 0)
+            return a;
+
+        static if (canUseBinaryGcd)
         {
-            auto t = b;
-            b = a % b;
-            a = t;
+            uint shift = 0;
+            while ((a & 1) == 0 && (b & 1) == 0)
+            {
+                a >>= 1;
+                b >>= 1;
+                shift++;
+            }
+
+            if ((a & 1) == 0) swap(a, b);
+
+            do
+            {
+                assert((a & 1) != 0);
+                while ((b & 1) == 0)
+                    b >>= 1;
+                if (a > b)
+                    swap(a, b);
+                b -= a;
+            } while (b);
+
+            return a << shift;
         }
-        return a;
+        else
+        {
+            // The only thing we have is %; fallback to Euclidean algorithm.
+            while (b != 0)
+            {
+                auto t = b;
+                b = a % b;
+                a = t;
+            }
+            return a;
+        }
     }
 }
 
@@ -3085,9 +3093,18 @@ if (!isIntegral!T &&
     assert(gcd(BigInt(2), BigInt(1)) == BigInt(1));
 }
 
+// Issue 20924
+@safe unittest
+{
+    import std.bigint : BigInt;
+    const a = BigInt("123143238472389492934020");
+    const b = BigInt("902380489324729338420924");
+    assert(__traits(compiles, gcd(a, b)));
+}
+
 // This is to make tweaking the speed/size vs. accuracy tradeoff easy,
 // though floats seem accurate enough for all practical purposes, since
-// they pass the "approxEqual(inverseFft(fft(arr)), arr)" test even for
+// they pass the "isClose(inverseFft(fft(arr)), arr)" test even for
 // size 2 ^^ 22.
 private alias lookup_t = float;
 
@@ -3601,37 +3618,37 @@ void inverseFft(Ret, R)(R range, Ret buf)
     // Test values from R and Octave.
     auto arr = [1,2,3,4,5,6,7,8];
     auto fft1 = fft(arr);
-    assert(approxEqual(map!"a.re"(fft1),
-        [36.0, -4, -4, -4, -4, -4, -4, -4]));
-    assert(approxEqual(map!"a.im"(fft1),
-        [0, 9.6568, 4, 1.6568, 0, -1.6568, -4, -9.6568]));
+    assert(isClose(map!"a.re"(fft1),
+        [36.0, -4, -4, -4, -4, -4, -4, -4], 1e-4));
+    assert(isClose(map!"a.im"(fft1),
+        [0, 9.6568, 4, 1.6568, 0, -1.6568, -4, -9.6568], 1e-4));
 
     auto fft1Retro = fft(retro(arr));
-    assert(approxEqual(map!"a.re"(fft1Retro),
-        [36.0, 4, 4, 4, 4, 4, 4, 4]));
-    assert(approxEqual(map!"a.im"(fft1Retro),
-        [0, -9.6568, -4, -1.6568, 0, 1.6568, 4, 9.6568]));
+    assert(isClose(map!"a.re"(fft1Retro),
+        [36.0, 4, 4, 4, 4, 4, 4, 4], 1e-4));
+    assert(isClose(map!"a.im"(fft1Retro),
+        [0, -9.6568, -4, -1.6568, 0, 1.6568, 4, 9.6568], 1e-4));
 
     auto fft1Float = fft(to!(float[])(arr));
-    assert(approxEqual(map!"a.re"(fft1), map!"a.re"(fft1Float)));
-    assert(approxEqual(map!"a.im"(fft1), map!"a.im"(fft1Float)));
+    assert(isClose(map!"a.re"(fft1), map!"a.re"(fft1Float)));
+    assert(isClose(map!"a.im"(fft1), map!"a.im"(fft1Float)));
 
     alias C = Complex!float;
     auto arr2 = [C(1,2), C(3,4), C(5,6), C(7,8), C(9,10),
         C(11,12), C(13,14), C(15,16)];
     auto fft2 = fft(arr2);
-    assert(approxEqual(map!"a.re"(fft2),
-        [64.0, -27.3137, -16, -11.3137, -8, -4.6862, 0, 11.3137]));
-    assert(approxEqual(map!"a.im"(fft2),
-        [72, 11.3137, 0, -4.686, -8, -11.3137, -16, -27.3137]));
+    assert(isClose(map!"a.re"(fft2),
+        [64.0, -27.3137, -16, -11.3137, -8, -4.6862, 0, 11.3137], 1e-4));
+    assert(isClose(map!"a.im"(fft2),
+        [72, 11.3137, 0, -4.686, -8, -11.3137, -16, -27.3137], 1e-4));
 
     auto inv1 = inverseFft(fft1);
-    assert(approxEqual(map!"a.re"(inv1), arr));
+    assert(isClose(map!"a.re"(inv1), arr, 1e-6));
     assert(reduce!max(map!"a.im"(inv1)) < 1e-10);
 
     auto inv2 = inverseFft(fft2);
-    assert(approxEqual(map!"a.re"(inv2), map!"a.re"(arr2)));
-    assert(approxEqual(map!"a.im"(inv2), map!"a.im"(arr2)));
+    assert(isClose(map!"a.re"(inv2), map!"a.re"(arr2)));
+    assert(isClose(map!"a.im"(inv2), map!"a.im"(arr2)));
 
     // FFTs of size 0, 1 and 2 are handled as special cases.  Test them here.
     ushort[] empty;
@@ -3646,21 +3663,21 @@ void inverseFft(Ret, R)(R range, Ret buf)
 
     auto oneInv = inverseFft(oneFft);
     assert(oneInv.length == 1);
-    assert(approxEqual(oneInv[0].re, 4.5));
-    assert(approxEqual(oneInv[0].im, 0));
+    assert(isClose(oneInv[0].re, 4.5));
+    assert(isClose(oneInv[0].im, 0, 0.0, 1e-10));
 
     long[2] twoElems = [8, 4];
     auto twoFft = fft(twoElems[]);
     assert(twoFft.length == 2);
-    assert(approxEqual(twoFft[0].re, 12));
-    assert(approxEqual(twoFft[0].im, 0));
-    assert(approxEqual(twoFft[1].re, 4));
-    assert(approxEqual(twoFft[1].im, 0));
+    assert(isClose(twoFft[0].re, 12));
+    assert(isClose(twoFft[0].im, 0, 0.0, 1e-10));
+    assert(isClose(twoFft[1].re, 4));
+    assert(isClose(twoFft[1].im, 0, 0.0, 1e-10));
     auto twoInv = inverseFft(twoFft);
-    assert(approxEqual(twoInv[0].re, 8));
-    assert(approxEqual(twoInv[0].im, 0));
-    assert(approxEqual(twoInv[1].re, 4));
-    assert(approxEqual(twoInv[1].im, 0));
+    assert(isClose(twoInv[0].re, 8));
+    assert(isClose(twoInv[0].im, 0, 0.0, 1e-10));
+    assert(isClose(twoInv[1].re, 4));
+    assert(isClose(twoInv[1].im, 0, 0.0, 1e-10));
 }
 
 // Swaps the real and imaginary parts of a complex number.  This is useful

@@ -29,6 +29,7 @@ import std.conv : ConvException;
 
 import std.format : FormatSpec, FormatException;
 import std.internal.math.biguintcore;
+import std.internal.math.biguintnoasm : BigDigit;
 import std.range.primitives;
 import std.traits;
 
@@ -323,7 +324,23 @@ public:
             sign = (y & 1) ? sign : false;
             data = BigUint.pow(data, u);
         }
-        else static if (op=="|" || op=="&" || op=="^")
+        else static if (op=="&")
+        {
+            if (y >= 0 && (y <= 1 || !sign)) // In these cases we can avoid some allocation.
+            {
+                static if (T.sizeof <= uint.sizeof && BigDigit.sizeof <= uint.sizeof)
+                    data = cast(ulong) data.peekUint(0) & y;
+                else
+                    data = data.peekUlong(0) & y;
+                sign = false;
+            }
+            else
+            {
+                BigInt b = y;
+                opOpAssign!op(b);
+            }
+        }
+        else static if (op=="|" || op=="^")
         {
             BigInt b = y;
             opOpAssign!op(b);
@@ -962,7 +979,8 @@ public:
                 uint resultBits = (uint(isNegative) << 31) | // sign bit
                     ((0xFF & (exponent - float.min_exp)) << 23) | // exponent
                     cast(uint) ((sansExponent << 1) >>> (64 - 23)); // mantissa.
-                return *cast(float*) &resultBits;
+                // TODO: remove @trusted lambda after DIP 1000 is enabled by default.
+                return (() @trusted => *cast(float*) &resultBits)();
             }
             else static if (T.mant_dig == double.mant_dig)
             {
@@ -971,7 +989,8 @@ public:
                 ulong resultBits = (ulong(isNegative) << 63) | // sign bit
                     ((0x7FFUL & (exponent - double.min_exp)) << 52) | // exponent
                     ((sansExponent << 1) >>> (64 - 52)); // mantissa.
-                return *cast(double*) &resultBits;
+                // TODO: remove @trusted lambda after DIP 1000 is enabled by default.
+                return (() @trusted => *cast(double*) &resultBits)();
             }
             else
             {
@@ -991,20 +1010,20 @@ public:
             if (w1 == 0)
                 return T(0); // Special: bsr(w1) is undefined.
             int bitsStillNeeded = totalNeededBits - bsr(w1) - 1;
-            T acc = scalbn(w1, scale);
+            T acc = scalbn(cast(T) w1, scale);
             for (ptrdiff_t i = ulongLength - 2; i >= 0 && bitsStillNeeded > 0; i--)
             {
                 ulong w = data.peekUlong(i);
                 // To round towards zero we must make sure not to use too many bits.
                 if (bitsStillNeeded >= 64)
                 {
-                    acc += scalbn(w, scale -= 64);
+                    acc += scalbn(cast(T) w, scale -= 64);
                     bitsStillNeeded -= 64;
                 }
                 else
                 {
                     w = (w >>> (64 - bitsStillNeeded)) << (64 - bitsStillNeeded);
-                    acc += scalbn(w, scale -= 64);
+                    acc += scalbn(cast(T) w, scale -= 64);
                     break;
                 }
             }
@@ -1269,7 +1288,7 @@ public:
         }
         assert(buff.length > 0, "Invalid buffer length");
 
-        char signChar = isNegative() ? '-' : 0;
+        char signChar = isNegative ? '-' : 0;
         auto minw = buff.length + (signChar ? 1 : 0);
 
         if (!hex && !signChar && (f.width == 0 || minw < f.width))
@@ -1442,10 +1461,7 @@ private:
     {
         return data.isZero();
     }
-    bool isNegative() pure const nothrow @nogc @safe
-    {
-        return sign;
-    }
+    alias isNegative = sign;
 
     // Generate a runtime error if division by zero occurs
     void checkDivByZero() pure const nothrow @safe
@@ -2143,23 +2159,23 @@ unittest
 {
     auto x = BigInt(-3);
     x %= 3;
-    assert(!x.isNegative());
-    assert(x.isZero());
+    assert(!x.isNegative);
+    assert(x.isZero);
 
     x = BigInt(-3);
     x %= cast(ushort) 3;
-    assert(!x.isNegative());
-    assert(x.isZero());
+    assert(!x.isNegative);
+    assert(x.isZero);
 
     x = BigInt(-3);
     x %= 3L;
-    assert(!x.isNegative());
-    assert(x.isZero());
+    assert(!x.isNegative);
+    assert(x.isZero);
 
     x = BigInt(3);
     x %= -3;
-    assert(!x.isNegative());
-    assert(x.isZero());
+    assert(!x.isNegative);
+    assert(x.isZero);
 }
 
 // https://issues.dlang.org/show_bug.cgi?id=15678

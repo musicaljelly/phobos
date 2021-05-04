@@ -351,12 +351,14 @@ if (isIntegral!T || is(T == Checked!(U, H), U, H))
     /**
     Assignment operator. Has the same constraints as the constructor.
     */
-    void opAssign(U)(U rhs) if (is(typeof(Checked!(T, Hook)(rhs))))
+    ref Checked opAssign(U)(U rhs) return
+    if (is(typeof(Checked!(T, Hook)(rhs))))
     {
         static if (isIntegral!U)
             payload = rhs;
         else
             payload = rhs.payload;
+        return this;
     }
     ///
     @system unittest
@@ -366,6 +368,14 @@ if (isIntegral!T || is(T == Checked!(U, H), U, H))
         assert(a == 42);
         a = 4242;
         assert(a == 4242);
+    }
+
+    ///
+    @system unittest
+    {
+        Checked!long a, b;
+        a = b = 3;
+        assert(a == 3 && b == 3);
     }
 
     // opCast
@@ -938,7 +948,7 @@ if (isIntegral!T || is(T == Checked!(U, H), U, H))
         {
             bool overflow;
             auto r = opChecked!op(lhs, T(payload), overflow);
-            if (overflow) r = hook.onOverflow!op(42);
+            if (overflow) r = hook.onOverflow!op(lhs, payload);
             return Checked!(typeof(r), Hook)(r);
         }
         else
@@ -1107,6 +1117,18 @@ if (is(typeof(Checked!(T, Hook)(value))))
     test!ubyte;
     test!(const ubyte);
     test!(immutable ubyte);
+}
+
+@system unittest
+{
+    // https://issues.dlang.org/show_bug.cgi?id=21758
+    assert(4 * checked(5L) == 20);
+    assert(20 / checked(5L) == 4);
+    assert(2 ^^ checked(3L) == 8);
+    assert(12 % checked(5L) == 2);
+    assert((0xff & checked(3L)) == 3);
+    assert((0xf0 | checked(3L)) == 0xf3);
+    assert((0xff ^ checked(3L)) == 0xfc);
 }
 
 // Abort
@@ -1633,17 +1655,31 @@ static:
 {
     auto a = checked!Warn(int.min);
     auto b = checked!Warn(-1);
-    assert(a / b == a * b);
-}
+    auto x = checked!Abort(int.min);
+    auto y = checked!Abort(-1);
 
-@system unittest
-{
-    import std.exception : assertThrown;
-    import core.exception : AssertError;
-
-    auto a = checked!Abort(int.min);
-    auto b = checked!Abort(-1);
-    assertThrown!AssertError(a / b);
+    // Temporarily redirect output to stderr to make sure we get the right output.
+    import std.process : uniqueTempPath;
+    import std.stdio : stderr;
+    auto tmpname = uniqueTempPath;
+    auto t = stderr;
+    stderr.open(tmpname, "w");
+    // Open a new scope to minimize code ran with stderr redirected.
+    {
+        scope(exit) stderr = t;
+        assert(a / b == a * b);
+        import std.exception : assertThrown;
+        import core.exception : AssertError;
+        assertThrown!AssertError(x / y);
+    }
+    import std.file : readText;
+    import std.ascii : newline;
+    auto witness = readText(tmpname);
+    auto expected =
+"Overflow on binary operator: int(-2147483648) / const(int)(-1)" ~ newline ~
+"Overflow on binary operator: int(-2147483648) * const(int)(-1)" ~ newline ~
+"Overflow on binary operator: int(-2147483648) / const(int)(-1)" ~ newline;
+    assert(witness == expected, "'" ~ witness ~ "'");
 }
 
 // ProperCompare
